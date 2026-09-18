@@ -1,0 +1,1042 @@
+{% extends "base.html" %}
+{% block title %}Admin Control Centre{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ── Admin-specific tokens ── */
+:root {
+  --admin:      #a78bfa;
+  --admin-dim:  #4c1d95;
+  --admin-glow: rgba(167,139,250,.15);
+  --su:         #fb923c;
+  --su-dim:     rgba(251,146,60,.15);
+}
+
+/* ── Sidebar layout ── */
+.adm-shell {
+  display: flex;
+  min-height: calc(100vh - 60px);
+}
+.adm-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--navy-mid);
+  border-right: 1px solid var(--border);
+  padding: 1.5rem 0;
+  position: sticky;
+  top: 60px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+.adm-sidebar-label {
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--muted);
+  padding: .25rem 1.25rem .6rem;
+}
+.adm-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: .65rem 1.25rem;
+  font-size: .88rem;
+  color: var(--muted);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: all .18s;
+  user-select: none;
+}
+.adm-nav-item:hover { color: var(--text); background: rgba(255,255,255,.03); }
+.adm-nav-item.active {
+  color: var(--admin);
+  border-left-color: var(--admin);
+  background: var(--admin-glow);
+  font-weight: 500;
+}
+.adm-nav-item .icon { font-size: 1rem; width: 20px; text-align: center; }
+.adm-nav-item.su-only { display: none; }
+.adm-nav-item.su-only.visible { display: flex; }
+
+/* ── Main content ── */
+.adm-main {
+  flex: 1;
+  padding: 2rem 2.5rem;
+  min-width: 0;
+}
+.adm-tab { display: none; animation: fadeIn .3s ease; }
+.adm-tab.active { display: block; }
+
+/* ── Section header ── */
+.sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.sec-title {
+  font-family: var(--font-head);
+  font-size: 1.7rem;
+  color: var(--white);
+}
+.sec-sub { font-size: .82rem; color: var(--muted); margin-top: 2px; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  background: var(--navy-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .85rem 1.25rem;
+  font-size: .88rem;
+  z-index: 9999;
+  max-width: 340px;
+  display: none;
+  box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  animation: fadeIn .25s ease;
+}
+#toast.ok  { border-color: var(--green); color: var(--green); }
+#toast.err { border-color: var(--red);   color: var(--red);   }
+
+/* ── Modal ── */
+.modal-bg {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.65);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+}
+.modal-bg.open { display: flex; }
+.modal {
+  background: var(--navy-mid);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 480px;
+  animation: fadeIn .25s ease;
+}
+.modal-title {
+  font-family: var(--font-head);
+  font-size: 1.3rem;
+  color: var(--white);
+  margin-bottom: 1.25rem;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: .75rem;
+  margin-top: 1.5rem;
+}
+
+/* ── Stats strip ── */
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.stat-card {
+  background: var(--navy-mid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: border-color .2s;
+}
+.stat-card:hover { border-color: #3a5070; }
+.stat-icon { font-size: 1.6rem; }
+.stat-info {}
+.stat-val { font-family: var(--font-head); font-size: 1.6rem; color: var(--white); line-height: 1; }
+.stat-lbl { font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+
+/* ── Table actions col ── */
+.act-btns { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+/* ── Role badge variants ── */
+.badge-admin { background: var(--admin-glow); color: var(--admin); }
+.badge-superuser { background: var(--su-dim); color: var(--su); }
+.badge-lecturer { background: rgba(96,165,250,.1); color: var(--blue); }
+.badge-student { background: rgba(34,211,160,.1); color: var(--green); }
+
+/* ── Log details ── */
+.log-details {
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  color: var(--muted);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Pagination ── */
+.pagination { display: flex; gap: .4rem; align-items: center; margin-top: 1rem; }
+.pg-btn {
+  background: var(--navy-mid);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .82rem;
+  transition: all .15s;
+}
+.pg-btn:hover { border-color: var(--admin); color: var(--admin); }
+.pg-btn.active { border-color: var(--admin); color: var(--admin); background: var(--admin-glow); }
+.pg-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Search bar ── */
+.search-bar {
+  display: flex;
+  gap: .75rem;
+  margin-bottom: 1.25rem;
+  align-items: center;
+}
+.search-bar .form-control { max-width: 260px; }
+
+/* ── Log action pill ── */
+.log-action {
+  font-family: var(--font-mono);
+  font-size: .72rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(167,139,250,.1);
+  color: var(--admin);
+}
+
+/* ── GPS panel ── */
+.gps-panel {
+  background: var(--navy-light);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: .5rem;
+}
+.gps-panel .gps-instruction {
+  font-size: .82rem;
+  color: var(--muted);
+  margin-bottom: .75rem;
+}
+.gps-panel .gps-status {
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  color: var(--amber);
+  margin-bottom: .75rem;
+}
+.gps-panel .gps-btn-row {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.gps-badge-set {
+  background: rgba(34,211,160,.1);
+  color: var(--green);
+  font-size: .72rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.gps-badge-none {
+  background: rgba(248,113,113,.1);
+  color: var(--red);
+  font-size: .72rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+@media (max-width: 900px) {
+  .adm-sidebar { display: none; }
+  .stats-strip { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .adm-main { padding: 1rem; }
+  .stats-strip { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="adm-shell">
+
+  <!-- ── Sidebar ── -->
+  <aside class="adm-sidebar">
+    <div class="adm-sidebar-label">Navigation</div>
+    <div class="adm-nav-item active" data-tab="locations">
+      <span class="icon">📍</span> Locations
+    </div>
+    <div class="adm-nav-item" data-tab="courses">
+      <span class="icon">📚</span> Courses
+    </div>
+    <div class="adm-nav-item" data-tab="enrollments">
+      <span class="icon">🎓</span> Enrollments
+    </div>
+    <div class="adm-nav-item su-only" id="nav-users" data-tab="users">
+      <span class="icon">👥</span> Users &amp; Roles
+    </div>
+    <div class="adm-nav-item" data-tab="logs">
+      <span class="icon">📋</span> Activity Logs
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="adm-main">
+
+    <!-- Overview stats -->
+    <div class="stats-strip" id="statsStrip">
+      <div class="stat-card"><span class="stat-icon">📍</span><div class="stat-info"><div class="stat-val" id="sLocations">—</div><div class="stat-lbl">Locations</div></div></div>
+      <div class="stat-card"><span class="stat-icon">📚</span><div class="stat-info"><div class="stat-val" id="sCourses">—</div><div class="stat-lbl">Courses</div></div></div>
+      <div class="stat-card"><span class="stat-icon">🎓</span><div class="stat-info"><div class="stat-val" id="sEnrollments">—</div><div class="stat-lbl">Enrollments</div></div></div>
+      <div class="stat-card"><span class="stat-icon">👤</span><div class="stat-info"><div class="stat-val" id="sUsers">—</div><div class="stat-lbl">Users</div></div></div>
+    </div>
+
+    <!-- ════ TAB: LOCATIONS ════ -->
+    <div class="adm-tab active" id="tab-locations">
+      <div class="sec-head">
+        <div><div class="sec-title">Locations</div><div class="sec-sub">Physical venues used for course scheduling</div></div>
+        <button class="btn btn-primary btn-sm" id="btnAddLocation">+ Add Location</button>
+      </div>
+      <div class="search-bar">
+        <input class="form-control" id="locSearch" placeholder="Filter by name…" oninput="renderLocations()">
+      </div>
+      <div class="card table-wrap">
+        <table id="locTable">
+          <thead><tr><th>Name</th><th>GPS</th><th>Radius</th><th>Schedules</th><th>Actions</th></tr></thead>
+          <tbody id="locBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;padding:2rem"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ════ TAB: COURSES ════ -->
+    <div class="adm-tab" id="tab-courses">
+      <div class="sec-head">
+        <div><div class="sec-title">Courses</div><div class="sec-sub">Manage courses and lecturer assignments</div></div>
+        <button class="btn btn-primary btn-sm" id="btnAddCourse">+ Add Course</button>
+      </div>
+      <div class="search-bar">
+        <input class="form-control" id="courseSearch" placeholder="Filter by code or name…" oninput="renderCourses()">
+      </div>
+      <div class="card table-wrap">
+        <table id="courseTable">
+          <thead><tr><th>Code</th><th>Name</th><th>Lecturer</th><th>Enrolled</th><th>Actions</th></tr></thead>
+          <tbody id="courseBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;padding:2rem"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ════ TAB: ENROLLMENTS ════ -->
+    <div class="adm-tab" id="tab-enrollments">
+      <div class="sec-head">
+        <div><div class="sec-title">Enrollments</div><div class="sec-sub">Assign and remove students from courses</div></div>
+        <button class="btn btn-primary btn-sm" id="btnAddEnrollment">+ Enroll Student</button>
+      </div>
+      <div class="search-bar">
+        <select class="form-control" id="enrollCourseFilter" onchange="loadEnrollments()" style="max-width:220px">
+          <option value="">All courses</option>
+        </select>
+        <input class="form-control" id="enrollSearch" placeholder="Filter by student name…" oninput="renderEnrollments()">
+      </div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Student</th><th>Email</th><th>Course</th><th>Enrolled</th><th>Actions</th></tr></thead>
+          <tbody id="enrollBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;padding:2rem"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ════ TAB: USERS (superuser only) ════ -->
+    <div class="adm-tab" id="tab-users">
+      <div class="sec-head">
+        <div><div class="sec-title">Users &amp; Roles</div><div class="sec-sub">Promote lecturers/students to admin or demote admins</div></div>
+      </div>
+      <div class="search-bar">
+        <select class="form-control" id="userRoleFilter" onchange="loadUsers()" style="max-width:180px">
+          <option value="">All roles</option>
+          <option value="admin">Admin</option>
+          <option value="lecturer">Lecturer</option>
+          <option value="student">Student</option>
+        </select>
+        <input class="form-control" id="userSearch" placeholder="Filter by name or email…" oninput="renderUsers()">
+      </div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th>Actions</th></tr></thead>
+          <tbody id="userBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;padding:2rem"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ════ TAB: LOGS ════ -->
+    <div class="adm-tab" id="tab-logs">
+      <div class="sec-head">
+        <div><div class="sec-title">Activity Logs</div><div class="sec-sub">Audit trail of all admin actions</div></div>
+        <button class="btn btn-outline btn-sm" onclick="loadLogs(1)">↻ Refresh</button>
+      </div>
+      <div class="search-bar">
+        <select class="form-control" id="logActionFilter" onchange="loadLogs(1)" style="max-width:200px">
+          <option value="">All actions</option>
+          <option value="ADD_VENUE">Add Venue</option>
+          <option value="EDIT_VENUE">Edit Venue</option>
+          <option value="DELETE_VENUE">Delete Venue</option>
+          <option value="ADD_COURSE">Add Course</option>
+          <option value="EDIT_COURSE">Edit Course</option>
+          <option value="DELETE_COURSE">Delete Course</option>
+          <option value="ENROLL_STUDENT">Enroll</option>
+          <option value="UNENROLL_STUDENT">Unenroll</option>
+          <option value="PROMOTE_USER">Promote</option>
+          <option value="DEMOTE_USER">Demote</option>
+        </select>
+      </div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+          <tbody id="logBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;padding:2rem"><span class="spinner"></span></td></tr></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="logPagination"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ════ MODALS ════ -->
+
+<!-- Add/Edit Location -->
+<div class="modal-bg" id="modalLocation">
+  <div class="modal">
+    <div class="modal-title" id="modalLocationTitle">Add Location</div>
+    <input type="hidden" id="locId">
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-control" id="locName" placeholder="e.g. Main Auditorium">
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Latitude</label>
+        <input class="form-control" id="locLat" placeholder="e.g. 6.5244" type="number" step="any">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Longitude</label>
+        <input class="form-control" id="locLng" placeholder="e.g. 3.3792" type="number" step="any">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('modalLocation')">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="btnSaveLocation" onclick="saveLocation()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Course -->
+<div class="modal-bg" id="modalCourse">
+  <div class="modal">
+    <div class="modal-title" id="modalCourseTitle">Add Course</div>
+    <input type="hidden" id="courseId">
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Course Code</label>
+        <input class="form-control" id="courseCode" placeholder="e.g. CSC401">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Lecturer</label>
+        <select class="form-control" id="courseLecturer"></select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Course Name</label>
+      <input class="form-control" id="courseName" placeholder="e.g. Advanced Algorithms">
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('modalCourse')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCourse()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Enroll Student -->
+<div class="modal-bg" id="modalEnroll">
+  <div class="modal">
+    <div class="modal-title">Enroll Student</div>
+    <div class="form-group">
+      <label class="form-label">Student</label>
+      <select class="form-control" id="enrollStudent"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Course</label>
+      <select class="form-control" id="enrollCourse"></select>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('modalEnroll')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveEnrollment()">Enroll</button>
+    </div>
+  </div>
+</div>
+
+<!-- Demote User -->
+<div class="modal-bg" id="modalDemote">
+  <div class="modal">
+    <div class="modal-title">Demote User</div>
+    <p style="color:var(--muted);font-size:.9rem;margin-bottom:1.25rem">
+      Select the role to demote <strong id="demoteName" style="color:var(--text)"></strong> to:
+    </p>
+    <input type="hidden" id="demoteId">
+    <div class="form-group">
+      <label class="form-label">New Role</label>
+      <select class="form-control" id="demoteRole">
+        <option value="lecturer">Lecturer</option>
+        <option value="student">Student</option>
+      </select>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline btn-sm" onclick="closeModal('modalDemote')">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="confirmDemote()">Demote</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+// ══════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════
+const IS_SUPERUSER = {{ 'true' if user.is_superuser else 'false' }};
+let state = {
+  locations: [], courses: [], enrollments: [],
+  users: [], lecturers: [], students: [],
+  logsPage: 1, logsTotalPages: 1,
+};
+
+// ══════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════
+document.addEventListener("DOMContentLoaded", () => {
+  if (IS_SUPERUSER) {
+    document.querySelectorAll(".su-only").forEach(el => el.classList.add("visible"));
+  }
+  // Tab nav
+  document.querySelectorAll(".adm-nav-item[data-tab]").forEach(el => {
+    el.addEventListener("click", () => switchTab(el.dataset.tab));
+  });
+  document.getElementById("btnAddLocation").addEventListener("click", openAddLocation);
+  document.getElementById("btnAddCourse").addEventListener("click", openAddCourse);
+  document.getElementById("btnAddEnrollment").addEventListener("click", openAddEnrollment);
+
+  // Close modal on backdrop click
+  document.querySelectorAll(".modal-bg").forEach(bg => {
+    bg.addEventListener("click", e => { if (e.target === bg) bg.classList.remove("open"); });
+  });
+
+  loadAll();
+});
+
+function switchTab(name) {
+  document.querySelectorAll(".adm-tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".adm-nav-item").forEach(n => n.classList.remove("active"));
+  document.getElementById("tab-" + name).classList.add("active");
+  document.querySelector(`.adm-nav-item[data-tab="${name}"]`).classList.add("active");
+  if (name === "logs") loadLogs(1);
+}
+
+// ══════════════════════════════════════════════
+//  API HELPERS
+// ══════════════════════════════════════════════
+async function api(method, url, body) {
+  const opts = { method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  const data = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, data };
+}
+
+function toast(msg, ok = true) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = ok ? "ok" : "err";
+  el.style.display = "block";
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = "none"; }, 3500);
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+function openModal(id)  { document.getElementById(id).classList.add("open"); }
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) +
+         " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+// ══════════════════════════════════════════════
+//  LOAD ALL (initial)
+// ══════════════════════════════════════════════
+async function loadAll() {
+  await Promise.all([
+    loadLocations(),
+    loadCourses(),
+    loadEnrollments(),
+    loadUsers(),
+  ]);
+  updateStats();
+}
+
+function updateStats() {
+  document.getElementById("sLocations").textContent = state.locations.length;
+  document.getElementById("sCourses").textContent = state.courses.length;
+  document.getElementById("sEnrollments").textContent = state.enrollments.length;
+  document.getElementById("sUsers").textContent = state.users.length;
+}
+
+// ══════════════════════════════════════════════
+//  LOCATIONS
+// ══════════════════════════════════════════════
+async function loadLocations() {
+  const { ok, data } = await api("GET", "/api/admin/locations");
+  if (ok) { state.locations = data.locations; renderLocations(); }
+}
+
+function renderLocations() {
+  const q = document.getElementById("locSearch").value.toLowerCase();
+  const list = state.locations.filter(l => l.name.toLowerCase().includes(q));
+  const tbody = document.getElementById("locBody");
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No locations found.</td></tr>`; return; }
+  tbody.innerHTML = list.map(l => {
+    const hasGps = l.latitude != null && l.longitude != null;
+    const gpsBadge = hasGps
+      ? `<span class="gps-badge-set">${l.latitude.toFixed(4)}, ${l.longitude.toFixed(4)}</span>`
+      : `<span class="gps-badge-none">Not set</span>`;
+    const radiusText = (l.radius != null && l.radius > 0) ? `${l.radius}m` : `--`;
+    return `
+    <tr>
+      <td><strong>${esc(l.name)}</strong></td>
+      <td>${gpsBadge}</td>
+      <td style="font-family:var(--font-mono);font-size:.82rem">${radiusText}</td>
+      <td><span class="badge badge-active">${l.schedule_count}</span></td>
+      <td><div class="act-btns">
+        <button class="btn btn-primary btn-sm" onclick="openGpsPanel(${l.id})">Set GPS</button>
+        <button class="btn btn-outline btn-sm" onclick="openEditLocation(${l.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteLocation(${l.id},'${esc(l.name)}')">Delete</button>
+      </div></td>
+    </tr>
+    <tr id="gps-row-${l.id}" style="display:none">
+      <td colspan="5">
+        <div class="gps-panel">
+          <div class="gps-instruction"><strong>Stand at the venue.</strong> Capture one point for a small room, or walk to each corner for a large hall.</div>
+          <div class="gps-status" id="gps-status-${l.id}">Ready - click Capture Point to begin.</div>
+          <div class="gps-btn-row">
+            <button class="btn btn-primary btn-sm" onclick="captureGpsPoint(${l.id})">Capture Point</button>
+            <button class="btn btn-outline btn-sm" id="gps-save-${l.id}" onclick="saveGps(${l.id})" disabled>Compute & Save</button>
+            <button class="btn btn-outline btn-sm" style="margin-left:auto;opacity:.6" onclick="closeGpsPanel(${l.id})">Cancel</button>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function openAddLocation() {
+  document.getElementById("locId").value = "";
+  document.getElementById("locName").value = "";
+  document.getElementById("locLat").value = "";
+  document.getElementById("locLng").value = "";
+  document.getElementById("modalLocationTitle").textContent = "Add Location";
+  openModal("modalLocation");
+}
+
+function openEditLocation(id) {
+  const l = state.locations.find(x => x.id === id);
+  if (!l) return;
+  document.getElementById("locId").value = l.id;
+  document.getElementById("locName").value = l.name;
+  document.getElementById("locLat").value = l.latitude;
+  document.getElementById("locLng").value = l.longitude;
+  document.getElementById("modalLocationTitle").textContent = "Edit Location";
+  openModal("modalLocation");
+}
+
+async function saveLocation() {
+  const id = document.getElementById("locId").value;
+  const body = {
+    name: document.getElementById("locName").value.trim(),
+    latitude: parseFloat(document.getElementById("locLat").value),
+    longitude: parseFloat(document.getElementById("locLng").value),
+  };
+  if (!body.name) { toast("Name is required", false); return; }
+  if (isNaN(body.latitude) || isNaN(body.longitude)) { toast("Valid coordinates required", false); return; }
+
+  const { ok, data } = id
+    ? await api("PUT", `/api/admin/locations/${id}`, body)
+    : await api("POST", "/api/admin/locations", body);
+
+  if (ok) {
+    toast(id ? "Location updated" : "Location added");
+    closeModal("modalLocation");
+    await loadLocations();
+    updateStats();
+  } else {
+    toast(data.error || "Error saving location", false);
+  }
+}
+
+async function deleteLocation(id, name) {
+  if (!confirm(`Delete location "${name}"?`)) return;
+  const { ok, data } = await api("DELETE", `/api/admin/locations/${id}`);
+  if (ok) { toast("Location deleted"); await loadLocations(); updateStats(); }
+  else toast(data.error || "Cannot delete location", false);
+}
+
+// ── GPS CAPTURE ──
+const _gpsPoints = {};  // venueId -> [{lat, lng}]
+const MAX_ACCURACY_M = 500;
+
+function openGpsPanel(venueId) {
+  // Close any open panels
+  document.querySelectorAll('[id^="gps-row-"]').forEach(r => r.style.display = 'none');
+  _gpsPoints[venueId] = [];
+  document.getElementById(`gps-status-${venueId}`).textContent = 'Ready - click Capture Point to begin.';
+  document.getElementById(`gps-save-${venueId}`).disabled = true;
+  document.getElementById(`gps-row-${venueId}`).style.display = '';
+}
+
+function closeGpsPanel(venueId) {
+  document.getElementById(`gps-row-${venueId}`).style.display = 'none';
+  _gpsPoints[venueId] = [];
+}
+
+function captureGpsPoint(venueId) {
+  const statusEl = document.getElementById(`gps-status-${venueId}`);
+  statusEl.textContent = 'Acquiring GPS...';
+
+  if (!navigator.geolocation) {
+    statusEl.textContent = 'Geolocation not supported by this browser.';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      if (pos.coords.accuracy > MAX_ACCURACY_M) {
+        statusEl.textContent = `GPS signal too weak (accuracy: ${Math.round(pos.coords.accuracy)}m). Try near a window.`;
+        return;
+      }
+      if (!_gpsPoints[venueId]) _gpsPoints[venueId] = [];
+      _gpsPoints[venueId].push({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      const n = _gpsPoints[venueId].length;
+      statusEl.textContent = `${n} point(s) captured (last: ${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}, +/-${Math.round(pos.coords.accuracy)}m)`;
+      document.getElementById(`gps-save-${venueId}`).disabled = false;
+    },
+    err => {
+      const msgs = {
+        1: 'Location access denied.',
+        2: 'Location unavailable. Turn on device location.',
+        3: 'Location timed out.',
+      };
+      statusEl.textContent = msgs[err.code] || 'GPS error.';
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}
+
+async function saveGps(venueId) {
+  const pts = _gpsPoints[venueId];
+  if (!pts || !pts.length) { toast('Capture at least one point first', false); return; }
+
+  const { ok, data } = await api('POST', `/api/admin/locations/${venueId}/set-gps`, { points: pts });
+  if (ok) {
+    toast(`GPS saved - center: ${data.center_lat.toFixed(6)}, ${data.center_lng.toFixed(6)}, radius: ${data.radius_m}m`);
+    closeGpsPanel(venueId);
+    await loadLocations();
+    updateStats();
+  } else {
+    toast(data.error || 'Error saving GPS', false);
+  }
+}
+
+// ══════════════════════════════════════════════
+//  COURSES
+// ══════════════════════════════════════════════
+async function loadCourses() {
+  const [cRes, uRes] = await Promise.all([
+    api("GET", "/api/admin/courses"),
+    api("GET", "/api/admin/users?role=lecturer"),
+  ]);
+  if (cRes.ok) { state.courses = cRes.data.courses; renderCourses(); }
+  if (uRes.ok) state.lecturers = uRes.data.users;
+}
+
+function renderCourses() {
+  const q = document.getElementById("courseSearch").value.toLowerCase();
+  const list = state.courses.filter(c =>
+    c.course_code.toLowerCase().includes(q) || c.course_name.toLowerCase().includes(q));
+  const tbody = document.getElementById("courseBody");
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No courses found.</td></tr>`; return; }
+  tbody.innerHTML = list.map(c => `
+    <tr>
+      <td><span class="badge badge-active" style="font-family:var(--font-mono)">${esc(c.course_code)}</span></td>
+      <td>${esc(c.course_name)}</td>
+      <td style="color:var(--blue)">${esc(c.lecturer_name || "—")}</td>
+      <td>${c.enrolled}</td>
+      <td><div class="act-btns">
+        <button class="btn btn-outline btn-sm" onclick="openEditCourse(${c.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCourse(${c.id},'${esc(c.course_code)}')">Delete</button>
+      </div></td>
+    </tr>`).join("");
+}
+
+function openAddCourse() {
+  document.getElementById("courseId").value = "";
+  document.getElementById("courseCode").value = "";
+  document.getElementById("courseName").value = "";
+  populateLecturerSelect();
+  document.getElementById("modalCourseTitle").textContent = "Add Course";
+  openModal("modalCourse");
+}
+
+function openEditCourse(id) {
+  const c = state.courses.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById("courseId").value = c.id;
+  document.getElementById("courseCode").value = c.course_code;
+  document.getElementById("courseName").value = c.course_name;
+  populateLecturerSelect(c.lecturer_id);
+  document.getElementById("modalCourseTitle").textContent = "Edit Course";
+  openModal("modalCourse");
+}
+
+function populateLecturerSelect(selectedId) {
+  const sel = document.getElementById("courseLecturer");
+  sel.innerHTML = state.lecturers.map(l =>
+    `<option value="${l.id}" ${l.id === selectedId ? "selected" : ""}>${esc(l.name)}</option>`).join("");
+}
+
+async function saveCourse() {
+  const id = document.getElementById("courseId").value;
+  const body = {
+    course_code: document.getElementById("courseCode").value.trim(),
+    course_name: document.getElementById("courseName").value.trim(),
+    lecturer_id: parseInt(document.getElementById("courseLecturer").value),
+  };
+  if (!body.course_code || !body.course_name) { toast("Code and name are required", false); return; }
+
+  const { ok, data } = id
+    ? await api("PUT", `/api/admin/courses/${id}`, body)
+    : await api("POST", "/api/admin/courses", body);
+
+  if (ok) {
+    toast(id ? "Course updated" : "Course created");
+    closeModal("modalCourse");
+    await loadCourses();
+    updateStats();
+  } else {
+    toast(data.error || "Error saving course", false);
+  }
+}
+
+async function deleteCourse(id, code) {
+  if (!confirm(`Delete course ${code}? This will remove all its sessions and enrollments.`)) return;
+  const { ok, data } = await api("DELETE", `/api/admin/courses/${id}`);
+  if (ok) { toast("Course deleted"); await Promise.all([loadCourses(), loadEnrollments()]); updateStats(); }
+  else toast(data.error || "Cannot delete course", false);
+}
+
+// ══════════════════════════════════════════════
+//  ENROLLMENTS
+// ══════════════════════════════════════════════
+async function loadEnrollments() {
+  const courseId = document.getElementById("enrollCourseFilter")?.value || "";
+  const url = courseId ? `/api/admin/enrollments?course_id=${courseId}` : "/api/admin/enrollments";
+  const [eRes, sRes] = await Promise.all([
+    api("GET", url),
+    api("GET", "/api/admin/users?role=student"),
+  ]);
+  if (eRes.ok) { state.enrollments = eRes.data.enrollments; }
+  if (sRes.ok) { state.students = sRes.data.users; }
+
+  // Populate course filter
+  const sel = document.getElementById("enrollCourseFilter");
+  if (sel && state.courses.length) {
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">All courses</option>` +
+      state.courses.map(c => `<option value="${c.id}" ${c.id == cur ? "selected" : ""}>${esc(c.course_code)} — ${esc(c.course_name)}</option>`).join("");
+    sel.value = cur;
+  }
+
+  renderEnrollments();
+}
+
+function renderEnrollments() {
+  const q = document.getElementById("enrollSearch").value.toLowerCase();
+  const list = state.enrollments.filter(e => e.student_name.toLowerCase().includes(q));
+  const tbody = document.getElementById("enrollBody");
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No enrollments found.</td></tr>`; return; }
+  tbody.innerHTML = list.map(e => `
+    <tr>
+      <td>${esc(e.student_name)}</td>
+      <td style="color:var(--muted);font-size:.82rem">${esc(e.student_email)}</td>
+      <td><span class="badge badge-active" style="font-family:var(--font-mono)">${esc(e.course_code)}</span></td>
+      <td style="font-size:.82rem;color:var(--muted)">${fmtDate(e.enrolled_at)}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="unenroll(${e.id},'${esc(e.student_name)}','${esc(e.course_code)}')">Remove</button></td>
+    </tr>`).join("");
+}
+
+function openAddEnrollment() {
+  const sSel = document.getElementById("enrollStudent");
+  const cSel = document.getElementById("enrollCourse");
+  sSel.innerHTML = state.students.map(s => `<option value="${s.id}">${esc(s.name)} — ${esc(s.email)}</option>`).join("");
+  cSel.innerHTML = state.courses.map(c => `<option value="${c.id}">${esc(c.course_code)} — ${esc(c.course_name)}</option>`).join("");
+  openModal("modalEnroll");
+}
+
+async function saveEnrollment() {
+  const body = {
+    student_id: parseInt(document.getElementById("enrollStudent").value),
+    course_id: parseInt(document.getElementById("enrollCourse").value),
+  };
+  const { ok, data } = await api("POST", "/api/admin/enrollments", body);
+  if (ok) {
+    toast("Student enrolled");
+    closeModal("modalEnroll");
+    await loadEnrollments();
+    updateStats();
+  } else {
+    toast(data.error || "Error enrolling student", false);
+  }
+}
+
+async function unenroll(id, name, code) {
+  if (!confirm(`Remove ${name} from ${code}?`)) return;
+  const { ok, data } = await api("DELETE", `/api/admin/enrollments/${id}`);
+  if (ok) { toast("Enrollment removed"); await loadEnrollments(); updateStats(); }
+  else toast(data.error || "Cannot remove enrollment", false);
+}
+
+// ══════════════════════════════════════════════
+//  USERS & ROLES
+// ══════════════════════════════════════════════
+async function loadUsers() {
+  const role = document.getElementById("userRoleFilter")?.value || "";
+  const url = role ? `/api/admin/users?role=${role}` : "/api/admin/users";
+  const { ok, data } = await api("GET", url);
+  if (ok) { state.users = data.users; renderUsers(); }
+}
+
+function renderUsers() {
+  const q = document.getElementById("userSearch")?.value.toLowerCase() || "";
+  const list = state.users.filter(u =>
+    u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  const tbody = document.getElementById("userBody");
+  if (!tbody) return;
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No users found.</td></tr>`; return; }
+
+  tbody.innerHTML = list.map(u => {
+    const badgeCls = u.is_superuser ? "badge-superuser" : u.role === "admin" ? "badge-admin" : u.role === "lecturer" ? "badge-lecturer" : "badge-student";
+    const roleLabel = u.is_superuser ? "Superuser" : u.role;
+    let actions = "";
+    if (IS_SUPERUSER) {
+      if (u.role !== "admin") {
+        actions = `<button class="btn btn-outline btn-sm" onclick="promoteUser(${u.id},'${esc(u.name)}')">Promote to Admin</button>`;
+      } else if (!u.is_superuser) {
+        actions = `<button class="btn btn-danger btn-sm" onclick="openDemote(${u.id},'${esc(u.name)}')">Demote</button>`;
+      } else {
+        actions = `<span style="color:var(--muted);font-size:.78rem">You</span>`;
+      }
+    }
+    return `<tr>
+      <td><strong>${esc(u.name)}</strong></td>
+      <td style="color:var(--muted);font-size:.82rem">${esc(u.email)}</td>
+      <td><span class="badge ${badgeCls}">${roleLabel}</span></td>
+      <td style="font-size:.82rem;color:var(--muted)">${fmtDate(u.created_at)}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function promoteUser(id, name) {
+  if (!confirm(`Promote ${name} to admin?`)) return;
+  const { ok, data } = await api("POST", `/api/admin/users/${id}/promote`);
+  if (ok) { toast(data.message || "User promoted"); await loadUsers(); }
+  else toast(data.error || "Cannot promote user", false);
+}
+
+function openDemote(id, name) {
+  document.getElementById("demoteId").value = id;
+  document.getElementById("demoteName").textContent = name;
+  openModal("modalDemote");
+}
+
+async function confirmDemote() {
+  const id = document.getElementById("demoteId").value;
+  const role = document.getElementById("demoteRole").value;
+  const { ok, data } = await api("POST", `/api/admin/users/${id}/demote`, { role });
+  if (ok) { toast(data.message || "User demoted"); closeModal("modalDemote"); await loadUsers(); }
+  else toast(data.error || "Cannot demote user", false);
+}
+
+// ══════════════════════════════════════════════
+//  LOGS
+// ══════════════════════════════════════════════
+async function loadLogs(page = 1) {
+  state.logsPage = page;
+  const action = document.getElementById("logActionFilter").value;
+  let url = `/api/admin/logs?page=${page}&per_page=25`;
+  if (action) url += `&action=${action}`;
+  const { ok, data } = await api("GET", url);
+  if (!ok) return;
+  state.logsTotalPages = data.pages || 1;
+  renderLogs(data.logs || []);
+  renderLogPagination();
+}
+
+function renderLogs(logs) {
+  const tbody = document.getElementById("logBody");
+  if (!logs.length) { tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:1.5rem">No log entries found.</td></tr>`; return; }
+  tbody.innerHTML = logs.map(l => {
+    let details = "";
+    try { details = JSON.stringify(JSON.parse(l.details), null, 0); } catch { details = l.details || ""; }
+    return `<tr>
+      <td style="font-size:.8rem;color:var(--muted);white-space:nowrap">${fmtDateTime(l.created_at)}</td>
+      <td style="font-size:.85rem">${esc(l.admin_name || "—")}</td>
+      <td><span class="log-action">${esc(l.action)}</span></td>
+      <td style="font-size:.82rem;color:var(--muted)">${esc(l.target_type || "—")} ${l.target_id ? "#" + l.target_id : ""}</td>
+      <td><div class="log-details" title="${esc(details)}">${esc(details)}</div></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderLogPagination() {
+  const pg = document.getElementById("logPagination");
+  const total = state.logsTotalPages;
+  const cur = state.logsPage;
+  if (total <= 1) { pg.innerHTML = ""; return; }
+  let html = `<button class="pg-btn" onclick="loadLogs(${cur - 1})" ${cur === 1 ? "disabled" : ""}>‹ Prev</button>`;
+  const start = Math.max(1, cur - 2), end = Math.min(total, cur + 2);
+  for (let i = start; i <= end; i++) {
+    html += `<button class="pg-btn ${i === cur ? "active" : ""}" onclick="loadLogs(${i})">${i}</button>`;
+  }
+  html += `<button class="pg-btn" onclick="loadLogs(${cur + 1})" ${cur === total ? "disabled" : ""}>Next ›</button>`;
+  html += `<span style="font-size:.8rem;color:var(--muted);margin-left:.5rem">Page ${cur} of ${total}</span>`;
+  pg.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════
+//  UTILS
+// ══════════════════════════════════════════════
+function esc(str) {
+  if (str == null) return "";
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+{% endblock %}

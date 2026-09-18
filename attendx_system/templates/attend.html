@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+{% block title %}Mark Attendance{% endblock %}
+
+{% block extra_head %}
+<style>
+  .attend-wrap {
+    max-width: 440px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 4rem;
+    text-align: center;
+  }
+  .attend-card {
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem 1.75rem;
+    margin-top: 1.5rem;
+  }
+  .attend-icon { font-size: 2.8rem; margin-bottom: .6rem; }
+  .attend-title {
+    font-family: var(--font-head);
+    font-size: 1.5rem;
+    color: var(--white);
+    margin-bottom: .25rem;
+  }
+  .attend-sub { color: var(--muted); font-size: .88rem; margin-bottom: 1.5rem; }
+  .attend-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .6rem;
+    margin-bottom: 1.5rem;
+    text-align: left;
+  }
+  .meta-item {
+    background: var(--navy);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .6rem .8rem;
+  }
+  .meta-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .meta-value { font-size: .92rem; color: var(--white); font-weight: 500; margin-top: 2px; }
+  .meta-value.mono { font-family: var(--font-mono); }
+  .step-indicator {
+    display: flex;
+    justify-content: center;
+    gap: .5rem;
+    margin-bottom: 1.5rem;
+  }
+  .step-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: all .3s;
+  }
+  .step-dot.active { background: var(--amber); box-shadow: 0 0 8px rgba(245,158,11,.4); }
+  .step-dot.done { background: var(--green); }
+  .status-msg {
+    font-size: .88rem;
+    color: var(--muted);
+    margin-bottom: 1rem;
+    min-height: 24px;
+  }
+  .status-msg .spin {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--amber);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .result-box {
+    padding: 1.25rem;
+    border-radius: 10px;
+    margin-top: 1rem;
+    display: none;
+  }
+  .result-box.ok {
+    background: rgba(34,211,160,.08);
+    border: 1px solid rgba(34,211,160,.3);
+    color: var(--green);
+    display: block;
+  }
+  .result-box.fail {
+    background: rgba(248,113,113,.08);
+    border: 1px solid rgba(248,113,113,.3);
+    color: var(--red);
+    display: block;
+  }
+  .result-icon { font-size: 2rem; margin-bottom: .4rem; }
+  .result-msg { font-size: .92rem; font-weight: 500; }
+  .result-detail { font-size: .8rem; margin-top: .4rem; opacity: .8; }
+  .login-form { text-align: left; }
+  .login-form .form-group { margin-bottom: 1rem; }
+  .demo-banner {
+    background: rgba(251,146,60,.1);
+    border: 1px solid rgba(251,146,60,.3);
+    color: #fb923c;
+    font-size: .78rem;
+    padding: 6px 12px;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+  }
+  .demo-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    margin-bottom: 1rem;
+    font-size: .82rem;
+    color: var(--muted);
+  }
+  .demo-toggle input { accent-color: var(--amber); }
+  .countdown-sm {
+    font-family: var(--font-mono);
+    color: var(--amber);
+    font-size: 1.1rem;
+  }
+  .closed-msg {
+    color: var(--red);
+    font-size: 1rem;
+    margin-top: 1rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="attend-wrap">
+  <div class="attend-icon" id="mainIcon">&#128247;</div>
+  <h1 class="attend-title" id="mainTitle">Attendance</h1>
+  <p class="attend-sub" id="mainSub">Loading session details...</p>
+
+  <div class="attend-card" id="attendCard" style="display:none">
+    <!-- Session info -->
+    <div class="attend-meta" id="sessionMeta"></div>
+
+    <!-- Steps: 1=Login  2=GPS  3=Submit -->
+    <div class="step-indicator">
+      <div class="step-dot" id="dot1"></div>
+      <div class="step-dot" id="dot2"></div>
+      <div class="step-dot" id="dot3"></div>
+    </div>
+
+    <!-- Step 1: Login -->
+    <div id="stepLogin" style="display:none">
+      <div class="login-form">
+        <div class="form-group">
+          <label class="form-label">Student Email</label>
+          <input class="form-control" id="attEmail" type="email" placeholder="e.g. chidi.nwosu@student.edu">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input class="form-control" id="attPassword" type="password" placeholder="Enter your password">
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Continue</button>
+      </div>
+    </div>
+
+    <!-- Step 2: GPS capture -->
+    <div id="stepGps" style="display:none">
+      <div class="status-msg" id="gpsStatus"><span class="spin"></span> Capturing your location...</div>
+      {% if debug_mode %}
+      <div class="demo-toggle">
+        <input type="checkbox" id="demoCheck"> <label for="demoCheck">Demo mode (simulate GPS)</label>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Step 3: Submitting -->
+    <div id="stepSubmit" style="display:none">
+      <div class="status-msg" id="submitStatus"><span class="spin"></span> Submitting attendance...</div>
+    </div>
+
+    <!-- Result -->
+    <div class="result-box" id="resultBox">
+      <div class="result-icon" id="resultIcon"></div>
+      <div class="result-msg" id="resultMsg"></div>
+      <div class="result-detail" id="resultDetail"></div>
+    </div>
+  </div>
+
+  <!-- Closed/expired state -->
+  <div id="closedMsg" style="display:none">
+    <div class="attend-card">
+      <div style="font-size:2.5rem;margin-bottom:.5rem">&#128683;</div>
+      <div class="closed-msg" id="closedText">This session has closed.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const params = new URLSearchParams(window.location.search);
+const SESSION_ID = parseInt(params.get("session")) || 0;
+const QR_TOKEN = params.get("t") || "";
+const IS_DEBUG = {{ 'true' if debug_mode else 'false' }};
+
+let sessionInfo = null;
+let studentEmail = "";
+let studentPassword = "";
+let gpsCoords = null;
+
+document.addEventListener("DOMContentLoaded", init);
+
+async function init() {
+  if (!SESSION_ID) {
+    showError("No session specified. Please scan a valid QR code.");
+    return;
+  }
+  try {
+    const r = await fetch(`/api/attend/info?session=${SESSION_ID}&t=${encodeURIComponent(QR_TOKEN)}`);
+    const data = await r.json();
+    if (!r.ok) { showError(data.error || "Session not found"); return; }
+    sessionInfo = data;
+
+    if (!data.is_open) {
+      document.getElementById("mainSub").textContent = "";
+      document.getElementById("closedMsg").style.display = "block";
+      document.getElementById("closedText").textContent =
+        data.status === "CLOSED" ? "This attendance session has closed." : "Session not found.";
+      return;
+    }
+
+    if (!data.token_valid) {
+      showError("This QR code has expired. Ask your lecturer to show the current code.");
+      return;
+    }
+
+    // Show session info
+    document.getElementById("mainTitle").textContent = data.course_code;
+    document.getElementById("mainSub").textContent = data.course_name;
+    document.getElementById("mainIcon").innerHTML = "&#9989;";
+
+    document.getElementById("sessionMeta").innerHTML = `
+      <div class="meta-item">
+        <div class="meta-label">Lecturer</div>
+        <div class="meta-value">${esc(data.lecturer_name)}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Time Remaining</div>
+        <div class="meta-value mono countdown-sm" id="countdown">${fmtSecs(data.seconds_remaining)}</div>
+      </div>
+    `;
+
+    document.getElementById("attendCard").style.display = "block";
+    startCountdown(data.seconds_remaining);
+    goToStep(1);
+  } catch (e) {
+    showError("Could not load session. Check your connection.");
+  }
+}
+
+function showError(msg) {
+  document.getElementById("mainSub").textContent = "";
+  document.getElementById("closedMsg").style.display = "block";
+  document.getElementById("closedText").textContent = msg;
+}
+
+// ── Step machine ──
+function goToStep(n) {
+  ["stepLogin","stepGps","stepSubmit"].forEach((id, i) => {
+    document.getElementById(id).style.display = (i + 1 === n) ? "block" : "none";
+  });
+  for (let i = 1; i <= 3; i++) {
+    const dot = document.getElementById("dot" + i);
+    dot.className = "step-dot" + (i < n ? " done" : i === n ? " active" : "");
+  }
+}
+
+// ── Step 1: Login ──
+function doLogin() {
+  studentEmail = document.getElementById("attEmail").value.trim();
+  studentPassword = document.getElementById("attPassword").value;
+  if (!studentEmail || !studentPassword) return;
+  goToStep(2);
+  captureGps();
+}
+
+// ── Step 2: GPS ──
+function captureGps() {
+  const useDemo = IS_DEBUG && document.getElementById("demoCheck")?.checked;
+  if (useDemo && sessionInfo.demo_coords) {
+    gpsCoords = {
+      lat: sessionInfo.demo_coords.lat,
+      lng: sessionInfo.demo_coords.lng,
+      accuracy: 5,
+    };
+    document.getElementById("gpsStatus").innerHTML = '<span style="color:var(--green)">Demo GPS used</span>';
+    setTimeout(() => submitAttendance(), 600);
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    document.getElementById("gpsStatus").innerHTML =
+      '<span style="color:var(--red)">Geolocation not supported by this browser.</span>';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      gpsCoords = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      };
+      document.getElementById("gpsStatus").innerHTML =
+        `<span style="color:var(--green)">Location captured (&#177;${Math.round(gpsCoords.accuracy)}m)</span>`;
+      setTimeout(() => submitAttendance(), 400);
+    },
+    (err) => {
+      const msgs = {
+        1: "Location permission denied. Please allow access.",
+        2: "Location unavailable. Move to a better area.",
+        3: "Location request timed out. Try again.",
+      };
+      document.getElementById("gpsStatus").innerHTML =
+        `<span style="color:var(--red)">${msgs[err.code] || "GPS error"}</span>`;
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+  );
+}
+
+// ── Step 3: Submit ──
+async function submitAttendance() {
+  goToStep(3);
+  try {
+    const r = await fetch("/api/attend/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: studentEmail,
+        password: studentPassword,
+        session_id: SESSION_ID,
+        qr_token: QR_TOKEN,
+        lat: gpsCoords.lat,
+        lng: gpsCoords.lng,
+        accuracy: gpsCoords.accuracy,
+      }),
+    });
+    const data = await r.json();
+    const box = document.getElementById("resultBox");
+    const icon = document.getElementById("resultIcon");
+    const msg = document.getElementById("resultMsg");
+    const detail = document.getElementById("resultDetail");
+
+    document.getElementById("stepSubmit").style.display = "none";
+
+    if (r.ok) {
+      box.className = "result-box ok";
+      icon.textContent = "\u2705";
+      msg.textContent = "Attendance Marked!";
+      detail.textContent = `${data.distance_m}m from venue \u00b7 ${data.timestamp}`;
+      document.getElementById("dot3").className = "step-dot done";
+    } else {
+      box.className = "result-box fail";
+      icon.textContent = "\u274c";
+      msg.textContent = "Could not mark attendance";
+      detail.textContent = data.error || "Unknown error";
+    }
+  } catch (e) {
+    document.getElementById("stepSubmit").style.display = "none";
+    const box = document.getElementById("resultBox");
+    box.className = "result-box fail";
+    document.getElementById("resultIcon").textContent = "\u274c";
+    document.getElementById("resultMsg").textContent = "Network error";
+    document.getElementById("resultDetail").textContent = "Check your connection and try again.";
+  }
+}
+
+// ── Countdown ──
+let countdownSecs = 0;
+function startCountdown(secs) {
+  countdownSecs = secs;
+  const el = document.getElementById("countdown");
+  if (!el) return;
+  const tick = () => {
+    countdownSecs = Math.max(0, countdownSecs - 1);
+    el.textContent = fmtSecs(countdownSecs);
+    if (countdownSecs <= 0) { clearInterval(iv); el.style.color = "var(--red)"; }
+  };
+  const iv = setInterval(tick, 1000);
+}
+
+// ── Helpers ──
+function fmtSecs(s) {
+  s = Math.max(0, s || 0);
+  return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+function esc(v) {
+  return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+</script>
+{% endblock %}

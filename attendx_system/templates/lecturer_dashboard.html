@@ -1,0 +1,1063 @@
+{% extends "base.html" %}
+
+{% block title %}Lecturer Dashboard{% endblock %}
+
+{% block extra_head %}
+<style>
+  .layout-grid {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 1.2rem;
+    align-items: start;
+  }
+
+  .calendar-card {
+    padding: 1rem;
+    position: sticky;
+    top: 76px;
+  }
+
+  .calendar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.8rem;
+    gap: 8px;
+  }
+
+  .calendar-title {
+    font-family: var(--font-head);
+    color: var(--white);
+    font-size: 1.1rem;
+  }
+
+  .cal-nav {
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .cal-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    background: var(--navy);
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  .cal-btn:hover { border-color: var(--amber); color: var(--amber); }
+
+  .week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .weekday {
+    text-align: center;
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 4px 0;
+  }
+
+  .day-cell {
+    border: 1px solid var(--border);
+    background: var(--navy);
+    border-radius: 8px;
+    min-height: 66px;
+    padding: 6px;
+    cursor: pointer;
+    transition: all 0.16s;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .day-cell:hover {
+    border-color: #3a5070;
+    transform: translateY(-1px);
+  }
+  .day-cell.empty {
+    opacity: 0.35;
+    cursor: default;
+    background: transparent;
+  }
+  .day-cell.today {
+    border-color: rgba(245,158,11,0.55);
+    box-shadow: 0 0 0 1px rgba(245,158,11,0.25) inset;
+  }
+  .day-cell.selected {
+    border-color: var(--green);
+    box-shadow: 0 0 0 1px rgba(34,211,160,0.25) inset;
+  }
+  .day-cell.has-courses .day-num {
+    color: var(--white);
+    font-weight: 600;
+  }
+
+  .day-num {
+    font-size: 0.82rem;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+
+  .day-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+  }
+
+  .day-count {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(96,165,250,0.14);
+    color: var(--blue);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+
+  .calendar-foot {
+    margin-top: 0.8rem;
+    font-size: 0.74rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .agenda-col {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .day-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .day-title {
+    font-family: var(--font-head);
+    color: var(--white);
+    font-size: 1.2rem;
+  }
+
+  .agenda-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+
+  .agenda-item {
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
+
+  .agenda-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.8rem;
+  }
+
+  .course-code {
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+  }
+
+  .course-name {
+    color: var(--white);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-top: 2px;
+    line-height: 1.25;
+  }
+
+  .course-sub {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 2px;
+  }
+
+  .live-block {
+    background: var(--navy-light);
+    border: 1px solid rgba(34,211,160,0.25);
+    border-radius: 6px;
+    padding: 8px 10px;
+    min-width: 150px;
+    text-align: right;
+  }
+
+  .live-time {
+    font-family: var(--font-mono);
+    color: var(--amber);
+    font-size: 1.2rem;
+    line-height: 1;
+  }
+  .live-time.urgent { color: var(--red); }
+
+  .agenda-stats {
+    margin-top: 0.8rem;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .agenda-stat {
+    background: var(--navy-light);
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+  }
+
+  .agenda-stat .v {
+    font-family: var(--font-head);
+    color: var(--white);
+    font-size: 1.2rem;
+    line-height: 1;
+  }
+
+  .agenda-stat .l {
+    font-size: 0.66rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 3px;
+  }
+
+  .control-grid {
+    margin-top: 0.9rem;
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr 1fr;
+    gap: 8px;
+  }
+
+  .control-grid-2 {
+    margin-top: 0.7rem;
+    display: grid;
+    grid-template-columns: 1fr 0.9fr 1.1fr;
+    gap: 8px;
+  }
+
+  .note {
+    margin-top: 0.6rem;
+    font-size: 0.76rem;
+    color: var(--muted);
+  }
+
+  .records-wrap {
+    margin-top: 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.8rem;
+    display: none;
+    background: var(--navy);
+  }
+  .records-wrap.open { display: block; }
+
+  .session-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.7rem;
+    background: var(--navy-mid);
+    margin-bottom: 0.6rem;
+  }
+
+  .session-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .session-meta {
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 1.2rem;
+    font-size: 0.86rem;
+  }
+
+  .toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    max-width: 360px;
+    background: var(--navy-light);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 0.84rem;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: all 0.25s;
+    pointer-events: none;
+    z-index: 300;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.success { border-color: rgba(34,211,160,0.45); color: var(--green); }
+  .toast.error { border-color: rgba(248,113,113,0.45); color: var(--red); }
+
+  @media (max-width: 940px) {
+    .layout-grid { grid-template-columns: 1fr; }
+    .calendar-card { position: static; }
+  }
+
+  @media (max-width: 620px) {
+    .control-grid,
+    .control-grid-2,
+    .agenda-stats { grid-template-columns: 1fr; }
+  }
+
+  /* ── Set Location styles ──────────────────────────────── */
+  .loc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-top: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--navy);
+  }
+
+  .loc-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .loc-status .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #4b5563;
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .loc-status.is-set .dot { background: var(--green); }
+  .loc-status.is-set { color: var(--green); }
+
+  .loc-panel {
+    margin-top: 0.6rem;
+    padding: 0.85rem;
+    border: 1px dashed rgba(96,165,250,0.3);
+    border-radius: 10px;
+    background: rgba(15,23,42,0.6);
+    display: none;
+    animation: fadeSlideIn 0.2s ease;
+  }
+  .loc-panel.open { display: block; }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .loc-instruction {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 0.65rem;
+    line-height: 1.45;
+  }
+  .loc-instruction strong { color: var(--text); }
+
+  .loc-gps-status {
+    font-size: 0.78rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: 6px;
+    background: var(--navy-light);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 34px;
+  }
+  .loc-gps-status .spin {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid var(--blue);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .loc-gps-status.ok   { border-color: rgba(34,211,160,0.4); color: var(--green); }
+  .loc-gps-status.warn { border-color: rgba(248,113,113,0.4); color: var(--red); }
+
+  .loc-counter {
+    font-size: 0.75rem;
+    color: var(--blue);
+    font-family: var(--font-mono);
+    margin-bottom: 0.6rem;
+  }
+
+  .loc-btn-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  /* ── QR Code panel ── */
+  .qr-panel {
+    margin-top: .9rem;
+    padding: 1rem;
+    border: 1px solid rgba(167,139,250,.3);
+    border-radius: 10px;
+    background: rgba(15,23,42,.7);
+    text-align: center;
+    animation: fadeSlideIn .25s ease;
+  }
+  .qr-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: .75rem;
+  }
+  .qr-label {
+    font-size: .78rem;
+    color: #a78bfa;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  .qr-canvas {
+    display: inline-block;
+    padding: 12px;
+    background: #fff;
+    border-radius: 10px;
+    margin-bottom: .6rem;
+  }
+  .qr-canvas canvas { display: block; }
+  .qr-meta {
+    font-size: .76rem;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  .qr-expire {
+    color: var(--amber);
+    font-weight: 600;
+  }
+  .qr-link-row {
+    margin-top: .6rem;
+    display: flex;
+    gap: .5rem;
+    justify-content: center;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+  <div class="page-header">
+    <h1 class="page-title">Attendance Calendar</h1>
+    <p class="page-subtitle">Pick a date, manage scheduled courses, start sessions, postpone classes, and view attendance.</p>
+  </div>
+
+  <div class="layout-grid">
+    <section class="card calendar-card">
+      <div class="calendar-head">
+        <button class="cal-btn" onclick="changeMonth(-1)" aria-label="Previous month">&#x2039;</button>
+        <div class="calendar-title" id="monthTitle">Loading...</div>
+        <button class="cal-btn" onclick="changeMonth(1)" aria-label="Next month">&#x203A;</button>
+      </div>
+
+      <div class="week-grid" style="margin-bottom:6px">
+        <div class="weekday">Mon</div>
+        <div class="weekday">Tue</div>
+        <div class="weekday">Wed</div>
+        <div class="weekday">Thu</div>
+        <div class="weekday">Fri</div>
+        <div class="weekday">Sat</div>
+        <div class="weekday">Sun</div>
+      </div>
+
+      <div class="week-grid" id="calendarGrid"></div>
+
+      <div class="calendar-foot">
+        <span>Tagged dates include your scheduled courses.</span>
+        <button class="btn btn-outline btn-sm" onclick="jumpToToday()">Today</button>
+      </div>
+    </section>
+
+    <section class="agenda-col">
+      <div class="card day-header">
+        <div>
+          <div class="day-title" id="dayTitle">Select a date</div>
+          <div class="card-sub" id="daySubtitle">Courses scheduled for the chosen day will appear here.</div>
+        </div>
+        <span class="badge badge-active" id="dayCountBadge" style="display:none">0 courses</span>
+      </div>
+
+      <div id="agendaList" class="agenda-list">
+        <div class="card empty">Loading calendar data...</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+let venues = [];
+let calendarPayload = null;
+let currentYear;
+let currentMonth;
+let selectedDateIso = null;
+let dayPayload = null;
+let dayPoller = null;
+const durationOptions = [5, 10, 15, 20, 30, 45, 60];
+
+window.addEventListener("DOMContentLoaded", async () => {
+  const now = new Date();
+  currentYear = now.getFullYear();
+  currentMonth = now.getMonth() + 1;
+
+  try {
+    await loadVenues();
+    await loadCalendar(currentYear, currentMonth);
+    const initial = localTodayIso();
+    await selectDate(initial);
+  } catch (err) {
+    document.getElementById("agendaList").innerHTML = `<div class="card alert-error">${escapeHtml(err.message || "Failed to load dashboard")}</div>`;
+  }
+});
+
+function isoDateFromDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function localTodayIso() {
+  return isoDateFromDate(new Date());
+}
+
+function toDateParts(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return { y, m, d };
+}
+
+function formatLongDate(iso) {
+  const p = toDateParts(iso);
+  return new Date(p.y, p.m - 1, p.d).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatSecs(secs) {
+  const s = Math.max(0, Number(secs) || 0);
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function showToast(message, type = "info") {
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.className = `toast ${type} show`;
+  window.clearTimeout(showToast._t);
+  showToast._t = window.setTimeout(() => toast.classList.remove("show"), 4200);
+}
+
+async function loadVenues() {
+  const res = await fetch("/api/lecturer/venues");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load venues.");
+  venues = data.venues || [];
+}
+
+async function loadCalendar(year, month) {
+  const res = await fetch(`/api/lecturer/calendar?year=${year}&month=${month}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load calendar.");
+  calendarPayload = data;
+  currentYear = data.year;
+  currentMonth = data.month;
+  renderCalendar();
+}
+
+function renderCalendar() {
+  document.getElementById("monthTitle").textContent = `${calendarPayload.month_name} ${calendarPayload.year}`;
+
+  const grid = document.getElementById("calendarGrid");
+  const todayIso = localTodayIso();
+  const days = calendarPayload.days || {};
+
+  const html = [];
+  for (const week of calendarPayload.weeks || []) {
+    for (const dayNumber of week) {
+      if (!dayNumber) {
+        html.push('<div class="day-cell empty"></div>');
+        continue;
+      }
+
+      const iso = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`;
+      const info = days[iso];
+      const classes = ["day-cell"];
+      if (iso === todayIso) classes.push("today");
+      if (selectedDateIso === iso) classes.push("selected");
+      if (info && info.count > 0) classes.push("has-courses");
+
+      let marker = "";
+      if (info && info.count) {
+        const label = info.count === 1 ? "class" : "classes";
+        marker = `<div class="chip-row"><span class="day-count" title="${info.count} ${label} scheduled">● ${info.count}</span></div>`;
+      }
+
+      html.push(`
+        <div class="${classes.join(" ")}" onclick="selectDate('${iso}')">
+          <div class="day-meta">
+            <span class="day-num">${dayNumber}</span>
+          </div>
+          ${marker}
+        </div>
+      `);
+    }
+  }
+
+  grid.innerHTML = html.join("");
+}
+
+async function changeMonth(delta) {
+  let y = currentYear;
+  let m = currentMonth + delta;
+  if (m < 1) { y -= 1; m = 12; }
+  if (m > 12) { y += 1; m = 1; }
+
+  await loadCalendar(y, m);
+
+  // Keep selected day if still in the same month, else select first day in this month.
+  if (selectedDateIso) {
+    const parts = toDateParts(selectedDateIso);
+    if (parts.y === y && parts.m === m) {
+      await selectDate(selectedDateIso);
+      return;
+    }
+  }
+
+  const first = `${y}-${String(m).padStart(2, "0")}-01`;
+  await selectDate(first);
+}
+
+async function jumpToToday() {
+  const now = new Date();
+  await loadCalendar(now.getFullYear(), now.getMonth() + 1);
+  await selectDate(localTodayIso());
+}
+
+async function selectDate(iso) {
+  selectedDateIso = iso;
+  renderCalendar();
+  await loadDay(iso);
+}
+
+async function loadDay(iso) {
+  const res = await fetch(`/api/lecturer/calendar/day?date=${encodeURIComponent(iso)}`);
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to load day details.");
+  }
+  dayPayload = data;
+  renderDay();
+  restartDayPolling();
+}
+
+function restartDayPolling() {
+  if (dayPoller) {
+    clearInterval(dayPoller);
+    dayPoller = null;
+  }
+
+  const hasOpen = (dayPayload?.items || []).some(i => i.open_session);
+  if (!hasOpen || !selectedDateIso) return;
+
+  dayPoller = setInterval(async () => {
+    try {
+      await loadDay(selectedDateIso);
+    } catch (_) {
+      // Keep UI responsive; transient errors are shown only on explicit actions.
+    }
+  }, 5000);
+}
+
+function buildVenueOptions(selectedId) {
+  const opts = ['<option value="">Select venue</option>'];
+  for (const v of venues) {
+    const sel = Number(selectedId) === Number(v.id) ? "selected" : "";
+    opts.push(`<option value="${v.id}" ${sel}>${escapeHtml(v.name)}</option>`);
+  }
+  return opts.join("");
+}
+
+function renderDay() {
+  const items = dayPayload?.items || [];
+  document.getElementById("dayTitle").textContent = formatLongDate(dayPayload.date);
+  document.getElementById("daySubtitle").textContent = "Courses and attendance controls for this date.";
+
+  const badge = document.getElementById("dayCountBadge");
+  badge.style.display = "inline-block";
+  badge.textContent = `${items.length} course${items.length === 1 ? "" : "s"}`;
+
+  const list = document.getElementById("agendaList");
+  if (!items.length) {
+    list.innerHTML = `<div class="card empty">No scheduled courses for this date.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(item => {
+    const open = item.open_session;
+    const running = !!open;
+    const canStart = !!item.can_start && !running;
+    const postponeLimit = Number(item.postpone_limit || 2);
+    const currentPostpones = Number(item.postpone_count || 0);
+    const canPostpone = !running && currentPostpones < postponeLimit;
+    const venueId = item.venue?.id || "";
+    const sessionSummary = item.latest_session
+      ? `<span class="badge ${item.latest_session.status === "OPEN" ? "badge-active" : "badge-closed"}">${escapeHtml(item.latest_session.status)}</span>`
+      : `<span class="badge badge-closed">No Session Yet</span>`;
+
+    // Location status from the day payload (course-level)
+    const locSet  = !!item.location_set;
+    const radText = locSet ? ` · ${Math.round(item.radius || 50)}m radius` : "";
+
+    return `
+      <div class="agenda-item fade-in" id="schedule-${item.schedule_id}">
+        <div class="agenda-top">
+          <div>
+            <div class="course-code">${escapeHtml(item.course_code)}</div>
+            <div class="course-name">${escapeHtml(item.course_name)}</div>
+            <div class="course-sub">${item.start_time || "--:--"} · ${escapeHtml(item.venue?.name || "Venue not set")}</div>
+          </div>
+          <div style="text-align:right;display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+            ${sessionSummary}
+            ${open ? `
+              <div class="live-block">
+                <div style="font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Open session</div>
+                <div class="live-time ${open.seconds_remaining <= 60 ? "urgent" : ""}}">${formatSecs(open.seconds_remaining)}</div>
+              </div>
+            ` : ""}
+          </div>
+        </div>
+
+        <div class="agenda-stats">
+          <div class="agenda-stat"><div class="v">${item.enrolled}</div><div class="l">Enrolled</div></div>
+          <div class="agenda-stat"><div class="v" style="color:var(--green)">${item.present}</div><div class="l">Present</div></div>
+          <div class="agenda-stat"><div class="v" style="color:var(--amber)">${item.attendance_rate}%</div><div class="l">Rate</div></div>
+        </div>
+
+
+
+        <div class="control-grid">
+          <select class="form-control" id="venue-${item.schedule_id}">${buildVenueOptions(venueId)}</select>
+          <select class="form-control" id="dur-${item.schedule_id}">
+            ${durationOptions.map(d => `<option value="${d}" ${d === 10 ? "selected" : ""}>${d} min</option>`).join("")}
+          </select>
+          <button class="btn btn-primary" ${canStart ? "" : "disabled"}
+                  onclick="startAttendance(${item.schedule_id}, ${item.course_id})">
+            ${running ? "Session Running" : (item.can_start ? "Start Attendance" : "Not Today's Class")}
+          </button>
+        </div>
+
+        <div class="control-grid-2">
+          <input class="form-control" id="postpone-date-${item.schedule_id}" type="date" value="${item.class_date}" />
+          <input class="form-control" id="postpone-time-${item.schedule_id}" type="time" value="${item.start_time || ""}" />
+          <button class="btn btn-outline" ${canPostpone ? "" : "disabled"} onclick="postponeSchedule(${item.schedule_id})">${canPostpone ? `Postpone (${currentPostpones}/${postponeLimit})` : `Can only postpone ${postponeLimit} times`}</button>
+        </div>
+
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="toggleAttendance(${item.schedule_id})">View Attendance List</button>
+        </div>
+
+        <div class="note">Location is captured live from your device. Session closes automatically when time expires.</div>
+
+        ${running ? `
+        <div class="qr-panel" id="qr-panel-${open.id}">
+          <div class="qr-head">
+            <span class="qr-label">Live QR Code</span>
+            <span class="qr-label" style="color:var(--muted);font-weight:400">Students scan this</span>
+          </div>
+          <div class="qr-canvas" id="qr-canvas-${open.id}"></div>
+          <div class="qr-meta" id="qr-meta-${open.id}">Generating...</div>
+          <div class="qr-link-row">
+            <button class="btn btn-outline btn-sm" onclick="copyAttendLink(${open.id})">🔗 Copy Link</button>
+            <button class="btn btn-primary btn-sm" onclick="openAttendLink(${open.id})">Open Link</button>
+          </div>
+        </div>
+        ` : ""}
+
+        <div id="records-${item.schedule_id}" class="records-wrap"></div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function startAttendance(scheduleId, courseId) {
+  const venueRaw = document.getElementById(`venue-${scheduleId}`)?.value;
+  const durRaw = document.getElementById(`dur-${scheduleId}`)?.value;
+
+  const durationMin = Number(durRaw);
+  if (!durationMin) {
+    showToast("Select a session duration.", "error");
+    return;
+  }
+
+  const payload = {
+    course_id: courseId,
+    schedule_id: scheduleId,
+    duration_min: durationMin,
+  };
+
+  if (venueRaw) payload.venue_id = Number(venueRaw);
+
+  try {
+    const res = await fetch("/api/lecturer/session/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not start session.");
+
+    showToast("Attendance session started.", "success");
+    await loadCalendar(currentYear, currentMonth);
+    await loadDay(selectedDateIso);
+  } catch (err) {
+    showToast(err.message || "Could not start session.", "error");
+  }
+}
+
+async function postponeSchedule(scheduleId) {
+  const dateVal = document.getElementById(`postpone-date-${scheduleId}`)?.value;
+  const timeVal = document.getElementById(`postpone-time-${scheduleId}`)?.value;
+  const venueRaw = document.getElementById(`venue-${scheduleId}`)?.value;
+
+  if (!dateVal) {
+    showToast("Pick a new date before postponing.", "error");
+    return;
+  }
+
+  const payload = { new_date: dateVal };
+  if (timeVal) payload.new_start_time = timeVal;
+  if (venueRaw) payload.venue_id = Number(venueRaw);
+
+  try {
+    const res = await fetch(`/api/lecturer/schedule/${scheduleId}/postpone`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Postpone failed.");
+
+    showToast("Schedule updated.", "success");
+
+    const p = toDateParts(dateVal);
+    await loadCalendar(p.y, p.m);
+    await selectDate(dateVal);
+  } catch (err) {
+    showToast(err.message || "Postpone failed.", "error");
+  }
+}
+
+async function toggleAttendance(scheduleId) {
+  const panel = document.getElementById(`records-${scheduleId}`);
+  if (!panel) return;
+
+  if (panel.classList.contains("open")) {
+    panel.classList.remove("open");
+    return;
+  }
+
+  panel.classList.add("open");
+  panel.innerHTML = '<div class="empty">Loading attendance...</div>';
+
+  try {
+    const res = await fetch(`/api/lecturer/schedule/${scheduleId}/attendance?date=${encodeURIComponent(selectedDateIso)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to load attendance list.");
+
+    if (!data.sessions?.length) {
+      panel.innerHTML = '<div class="empty">No attendance sessions for this date.</div>';
+      return;
+    }
+
+    panel.innerHTML = data.sessions.map(sess => {
+      const recordsHtml = sess.records.length
+        ? `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Time</th>
+                  <th>Distance</th>
+                  <th>GPS</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${sess.records.map(r => `
+                  <tr>
+                    <td>
+                      <div style="font-weight:600">${escapeHtml(r.student_name)}</div>
+                      <div style="font-size:0.72rem;color:var(--muted);font-family:var(--font-mono)">${escapeHtml(r.student_email)}</div>
+                    </td>
+                    <td style="font-family:var(--font-mono)">${escapeHtml(r.timestamp)}</td>
+                    <td style="font-family:var(--font-mono)">${r.distance_m}m</td>
+                    <td style="font-family:var(--font-mono)">±${r.accuracy_m}m</td>
+                    <td><span class="badge badge-present">${escapeHtml(String(r.status).toUpperCase())}</span></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        `
+        : '<div class="empty">No submissions yet.</div>';
+
+      return `
+        <div class="session-card">
+          <div class="session-head">
+            <span class="badge ${sess.status === "OPEN" ? "badge-active" : "badge-closed"}">${escapeHtml(sess.status)}</span>
+            <span class="session-meta">${new Date(sess.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${new Date(sess.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          </div>
+          ${recordsHtml}
+        </div>
+      `;
+    }).join("");
+  } catch (err) {
+    panel.innerHTML = `<div class="alert-error">${escapeHtml(err.message || "Failed to load attendance list")}</div>`;
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// QR CODE — fetch token, render, auto-refresh
+// ────────────────────────────────────────────────────────────
+let _qrIntervals = {};
+let _qrInstances = {};
+
+function startQrPolling() {
+  // Stop all old intervals
+  Object.values(_qrIntervals).forEach(clearInterval);
+  _qrIntervals = {};
+
+  const items = dayPayload?.items || [];
+  for (const item of items) {
+    if (item.open_session) {
+      const sid = item.open_session.id;
+      refreshQr(sid);
+      _qrIntervals[sid] = setInterval(() => refreshQr(sid), 5000);
+    }
+  }
+}
+
+async function refreshQr(sessionId) {
+  const canvas = document.getElementById(`qr-canvas-${sessionId}`);
+  const meta = document.getElementById(`qr-meta-${sessionId}`);
+  if (!canvas) return;
+
+  try {
+    const r = await fetch(`/api/lecturer/session/${sessionId}/qr-token`);
+    const data = await r.json();
+    if (!r.ok) {
+      if (meta) meta.textContent = data.error || "Session closed";
+      clearInterval(_qrIntervals[sessionId]);
+      return;
+    }
+
+    // Store URL for copy/open
+    canvas.dataset.url = data.attend_url;
+
+    // Render QR code
+    canvas.innerHTML = "";
+    if (typeof QRCode !== "undefined") {
+      new QRCode(canvas, {
+        text: data.attend_url,
+        width: 200,
+        height: 200,
+        colorDark: "#0c1424",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M,
+      });
+    } else {
+      canvas.textContent = "QR library not loaded";
+    }
+
+    if (meta) {
+      meta.innerHTML = `Token rotates in <span class="qr-expire">${data.expires_in}s</span> &middot; Session: ${data.seconds_remaining}s left`;
+    }
+  } catch (_) {
+    if (meta) meta.textContent = "Error loading QR";
+  }
+}
+
+function copyAttendLink(sessionId) {
+  const canvas = document.getElementById(`qr-canvas-${sessionId}`);
+  const url = canvas?.dataset.url;
+  if (url) {
+    navigator.clipboard.writeText(url).then(
+      () => showToast("Attendance link copied!", "success"),
+      () => showToast("Could not copy link", "error")
+    );
+  }
+}
+
+function openAttendLink(sessionId) {
+  const canvas = document.getElementById(`qr-canvas-${sessionId}`);
+  const url = canvas?.dataset.url;
+  if (url) window.open(url, "_blank");
+}
+
+// Hook QR polling into day render
+const _origRenderDay = renderDay;
+renderDay = function() {
+  _origRenderDay();
+  startQrPolling();
+};
+</script>
+{% endblock %}

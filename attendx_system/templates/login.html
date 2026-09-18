@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — AttendX</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy:       #0c1424;
+      --navy-mid:   #131f35;
+      --navy-light: #1c2e4a;
+      --border:     #243757;
+      --text:       #e2e8f0;
+      --muted:      #7a93b8;
+      --amber:      #f59e0b;
+      --amber-dim:  #92600a;
+      --green:      #22d3a0;
+      --red:        #f87171;
+      --radius:     10px;
+      --font-head:  'DM Serif Display', Georgia, serif;
+      --font-body:  'IBM Plex Sans', system-ui, sans-serif;
+      --font-mono:  'IBM Plex Mono', monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--navy);
+      color: var(--text);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      overflow: hidden;
+    }
+
+    /* Background grid decoration */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 48px 48px;
+      opacity: 0.25;
+      pointer-events: none;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -20%;
+      right: -10%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(245,158,11,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .login-card {
+      position: relative;
+      background: var(--navy-mid);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 3rem 2.5rem;
+      width: 100%;
+      max-width: 420px;
+      animation: slideUp 0.5s ease;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.5);
+    }
+    @keyframes slideUp {
+      from { opacity:0; transform: translateY(24px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+
+    .brand {
+      font-family: var(--font-head);
+      font-size: 2.2rem;
+      color: var(--amber);
+      letter-spacing: -0.03em;
+      line-height: 1;
+      margin-bottom: 0.4rem;
+    }
+    .brand span { color: var(--text); }
+
+    .brand-tagline {
+      font-size: 0.82rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      margin-bottom: 2.5rem;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .form-group { margin-bottom: 1.2rem; }
+
+    .form-control {
+      width: 100%;
+      background: var(--navy);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 12px 16px;
+      font-family: var(--font-body);
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .form-control:focus {
+      border-color: var(--amber);
+      box-shadow: 0 0 0 3px rgba(245,158,11,0.12);
+    }
+
+    .btn-submit {
+      width: 100%;
+      background: var(--amber);
+      color: #0c1000;
+      border: none;
+      border-radius: var(--radius);
+      padding: 13px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-family: var(--font-body);
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-submit:hover { background: #fbbf24; }
+    .btn-submit:active { transform: scale(0.99); }
+    .btn-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .alert-error {
+      background: rgba(248,113,113,0.1);
+      border: 1px solid rgba(248,113,113,0.3);
+      color: var(--red);
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      margin-bottom: 1.2rem;
+      display: none;
+    }
+    .alert-error.visible { display: block; animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 2rem 0 1.5rem;
+    }
+    .hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+      font-family: var(--font-mono);
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 15px; height: 15px;
+      border: 2px solid rgba(12,16,0,0.3);
+      border-top-color: #0c1000;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg) } }
+
+    /* Corner decoration */
+    .corner-mark {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--border);
+      letter-spacing: 0.1em;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <span class="corner-mark">v1.0</span>
+
+    <div class="brand">Attend<span>X</span></div>
+    <div class="brand-tagline">Location-Based Attendance System</div>
+
+    <div class="alert-error" id="errorMsg"></div>
+
+    <div class="form-group">
+      <label class="form-label" for="email">University Email</label>
+      <input class="form-control" type="email" id="email"
+             placeholder="you@university.edu" autocomplete="email" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="password">Password</label>
+      <input class="form-control" type="password" id="password"
+             placeholder="••••••••••" autocomplete="current-password" />
+    </div>
+
+    <button class="btn-submit" id="loginBtn" onclick="handleLogin()">
+      Sign In
+    </button>
+
+    <div class="divider"></div>
+    <div class="hint">
+      Demo password for all accounts: <strong>password123</strong><br>
+      Admin: admin@university.edu<br>
+      Lecturer: amara.osei@university.edu<br>
+      Student: chidi.nwosu@student.edu
+    </div>
+  </div>
+
+  <script>
+    // Allow Enter key to submit
+    document.addEventListener("keydown", e => {
+      if (e.key === "Enter") handleLogin();
+    });
+
+    async function handleLogin() {
+      const btn   = document.getElementById("loginBtn");
+      const err   = document.getElementById("errorMsg");
+      const email = document.getElementById("email").value.trim();
+      const pass  = document.getElementById("password").value;
+
+      err.classList.remove("visible");
+
+      if (!email || !pass) {
+        showError("Please enter your email and password.");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Signing in…';
+
+      try {
+        const res  = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: pass })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          showError(data.error || "Login failed. Please try again.");
+          return;
+        }
+
+        window.location.href = data.redirect;
+      } catch (e) {
+        showError("Network error. Please try again.");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = "Sign In";
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById("errorMsg");
+      el.textContent = msg;
+      el.classList.add("visible");
+    }
+  </script>
+</body>
+</html>

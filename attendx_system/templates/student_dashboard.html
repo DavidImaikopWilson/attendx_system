@@ -1,0 +1,781 @@
+{% extends "base.html" %}
+
+{% block title %}Student Dashboard{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* ─── COURSE CARDS ─── */
+  .courses-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.2rem;
+  }
+
+  .course-card {
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.2s, transform 0.15s;
+    cursor: default;
+  }
+  .course-card.has-active {
+    border-color: rgba(34,211,160,0.35);
+    box-shadow: 0 0 20px rgba(34,211,160,0.05);
+  }
+  .course-card:hover { transform: translateY(-2px); }
+
+  .course-card-header {
+    padding: 1.2rem 1.4rem 1rem;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .course-code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--amber);
+    font-weight: 500;
+  }
+  .course-name {
+    font-family: var(--font-head);
+    font-size: 1.05rem;
+    color: var(--white);
+    line-height: 1.3;
+    margin-top: 2px;
+  }
+  .course-lecturer {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  .course-card-body {
+    padding: 0 1.4rem 1.4rem;
+  }
+
+  /* Active session panel */
+  .session-panel {
+    background: var(--navy-light);
+    border: 1px solid rgba(34,211,160,0.2);
+    border-radius: 6px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+  .session-panel-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .timer-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  .timer-value {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    font-weight: 500;
+    color: var(--amber);
+    line-height: 1;
+  }
+  .timer-value.urgent { color: var(--red); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.45} }
+
+  /* No active session state */
+  .no-session {
+    padding: 0.8rem 0 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  .no-session-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  /* Mark attendance button */
+  .btn-mark {
+    width: 100%;
+    background: var(--green);
+    color: #001a0f;
+    border: none;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .btn-mark:hover { background: #34d399; }
+  .btn-mark:disabled {
+    background: rgba(34,211,160,0.15);
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+
+  /* Already marked state */
+  .already-marked {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--green);
+    font-weight: 500;
+  }
+  .check-icon {
+    width: 20px; height: 20px;
+    background: rgba(34,211,160,0.15);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    flex-shrink: 0;
+  }
+
+  /* GPS status indicator */
+  .gps-status {
+    font-size: 0.75rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-mono);
+  }
+  .gps-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .gps-dot.ready  { background: var(--green); }
+  .gps-dot.error  { background: var(--red); }
+  .gps-dot.waiting { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
+
+  /* Feedback toast */
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--navy-light);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 24px;
+    font-size: 0.9rem;
+    max-width: 520px;
+    width: calc(100vw - 2rem);
+    text-align: center;
+    white-space: pre-line;
+    opacity: 0;
+    transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 999;
+    pointer-events: none;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  .toast.success { border-color: rgba(34,211,160,0.4); color: var(--green); }
+  .toast.error   { border-color: rgba(248,113,113,0.4); color: var(--red); }
+
+  /* Loading skeleton */
+  .skeleton {
+    background: linear-gradient(90deg, var(--navy-light) 25%, var(--navy-mid) 50%, var(--navy-light) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    height: 16px;
+    margin-bottom: 8px;
+  }
+  @keyframes shimmer { from{background-position:200% 0} to{background-position:-200% 0} }
+
+  /* Stats bar */
+  .stats-bar {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+    padding: 1.2rem 1.5rem;
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .stat-item { flex: 1; text-align: center; }
+  .stat-num {
+    font-family: var(--font-head);
+    font-size: 1.8rem;
+    color: var(--white);
+    line-height: 1;
+  }
+  .stat-lbl { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
+
+  .empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--muted);
+  }
+  .empty-state-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.4; }
+
+  /* QR Scanner */
+  .qr-actions {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    margin-top: .6rem;
+  }
+  .btn-scan {
+    width: 100%;
+    background: rgba(167,139,250,.15);
+    color: #a78bfa;
+    border: 1px solid rgba(167,139,250,.3);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .btn-scan:hover { background: rgba(167,139,250,.25); }
+  .btn-demo-link {
+    width: 100%;
+    background: transparent;
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 0.78rem;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-demo-link:hover { border-color: var(--amber); color: var(--amber); }
+  .scanner-box {
+    margin-top: .6rem;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #000;
+  }
+  .scanner-box video { width: 100%; display: block; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-wrapper">
+  <div class="page-header">
+    <h1 class="page-title">Good day, {{ user.name.split()[0] }}</h1>
+    <p class="page-subtitle">Your enrolled courses and live attendance sessions</p>
+  </div>
+
+  <!-- Stats bar (populated by JS) -->
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-item">
+      <div class="stat-num" id="statTotal">—</div>
+      <div class="stat-lbl">Courses</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" id="statActive" style="color:var(--green)">—</div>
+      <div class="stat-lbl">Active Now</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" id="statMarked" style="color:var(--amber)">—</div>
+      <div class="stat-lbl">Marked Today</div>
+    </div>
+  </div>
+
+  <!-- Course cards -->
+  <div class="courses-grid" id="coursesGrid">
+    <!-- Skeletons while loading -->
+    <div class="card"><div class="skeleton" style="width:60%"></div><div class="skeleton"></div><div class="skeleton" style="width:40%"></div></div>
+    <div class="card"><div class="skeleton" style="width:60%"></div><div class="skeleton"></div><div class="skeleton" style="width:40%"></div></div>
+    <div class="card"><div class="skeleton" style="width:60%"></div><div class="skeleton"></div><div class="skeleton" style="width:40%"></div></div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<!-- GPS permission modal (shown on first mark attempt) -->
+<div id="gpsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center">
+  <div class="card fade-in" style="max-width:380px;width:calc(100vw - 2rem);text-align:center;padding:2rem">
+    <div style="font-size:2.5rem;margin-bottom:1rem">📍</div>
+    <h3 class="card-title" style="margin-bottom:0.5rem">Location Required</h3>
+    <p style="font-size:0.85rem;color:var(--muted);margin-bottom:1.5rem">
+      Allow location access so the system can verify you're in class.
+      Your location is only used during attendance and is not stored beyond what's required.
+    </p>
+    <button class="btn btn-primary" style="width:100%" onclick="closeGpsModal()">Got it</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+// ─────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────
+let courses   = [];
+let timers    = {};   // { courseId: intervalId }
+
+
+function setGpsStatusAll(kind, text) {
+  document.querySelectorAll("[id^='gpsText-']").forEach(el => {
+    el.textContent = text;
+  });
+  document.querySelectorAll("[id^='gpsDot-']").forEach(el => {
+    el.className = `gps-dot ${kind}`;
+  });
+}
+
+
+function geolocationNeedsSecureContext() {
+  const host = (window.location.hostname || "").toLowerCase();
+  const isLocalhost = host === "localhost" || host === "127.0.0.1";
+  return !window.isSecureContext && !isLocalhost;
+}
+
+
+function insecureContextMessage() {
+  return "Location requires HTTPS on non-localhost addresses. Open this app via localhost on the same device, or run it over HTTPS.";
+}
+
+// ─────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", () => {
+  loadCourses();
+  // Refresh course list every 30 seconds (new sessions may start)
+  setInterval(loadCourses, 30_000);
+  // Update GPS readiness indicators without forcing a permission prompt.
+  prefetchGPS();
+});
+
+// ─────────────────────────────────────────────────
+// LOAD COURSES
+// ─────────────────────────────────────────────────
+async function loadCourses() {
+  try {
+    const res  = await fetch("/api/student/courses");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    courses = data.courses;
+    renderCourses();
+    renderStats();
+  } catch (e) {
+    document.getElementById("coursesGrid").innerHTML =
+      `<div class="alert-error" style="grid-column:1/-1">${e.message || "Failed to load courses."}</div>`;
+  }
+}
+
+function renderStats() {
+  const total   = courses.length;
+  const active  = courses.filter(c => c.session).length;
+  const marked  = courses.filter(c => c.session && c.session.already_marked).length;
+
+  document.getElementById("statTotal").textContent  = total;
+  document.getElementById("statActive").textContent  = active;
+  document.getElementById("statMarked").textContent  = marked;
+}
+
+function renderCourses() {
+  // Clear all running timers
+  Object.values(timers).forEach(clearInterval);
+  timers = {};
+
+  const grid = document.getElementById("coursesGrid");
+  if (!courses.length) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-state-icon">📚</div>
+        <p>You are not enrolled in any courses yet.</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = courses.map(c => buildCard(c)).join("");
+
+  // Start countdowns for active sessions
+  courses.forEach(c => {
+    if (c.session && !c.session.already_marked) {
+      startCountdown(c.course_id, c.session.seconds_remaining);
+    }
+  });
+}
+
+function buildCard(c) {
+  const sess = c.session;
+
+  let sessionHTML = "";
+
+  if (sess) {
+    if (sess.already_marked) {
+      sessionHTML = `
+        <div class="session-panel">
+          <div class="session-panel-top">
+            <span class="badge badge-active">${sess.status}</span>
+            <span class="gps-status"><span class="gps-dot ready"></span> ${fmtSecs(sess.seconds_remaining)} left</span>
+          </div>
+          <div class="already-marked">
+            <div class="check-icon">✓</div>
+            Attendance marked for this session
+          </div>
+        </div>`;
+    } else {
+      sessionHTML = `
+        <div class="session-panel">
+          <div class="session-panel-top">
+            <span class="badge badge-active">${sess.status}</span>
+            <div>
+              <div class="timer-label">Time remaining</div>
+              <div class="timer-value" id="timer-${c.course_id}">${fmtSecs(sess.seconds_remaining)}</div>
+            </div>
+          </div>
+          <div class="gps-status" id="gpsStatus-${c.course_id}">
+            <span class="gps-dot waiting" id="gpsDot-${c.course_id}"></span>
+            <span id="gpsText-${c.course_id}">Acquiring GPS...</span>
+          </div>
+          <button class="btn-scan" id="scanBtn-${c.course_id}" onclick="startScanner(${c.course_id}, ${sess.id})">
+            Scan QR Code
+          </button>
+          <div class="qr-actions">
+            <button class="btn-demo-link" id="markBtn-${c.course_id}"
+                    onclick="markAttendance(${c.course_id}, ${sess.id})">
+              Mark Attendance (demo)
+            </button>
+          </div>
+          <div class="scanner-box" id="scanner-${c.course_id}" style="display:none"></div>
+        </div>`;
+    }
+  } else {
+    sessionHTML = `
+      <div class="no-session">
+        <span class="no-session-dot"></span>
+        No open attendance session
+      </div>`;
+  }
+
+  return `
+    <div class="course-card ${sess && !sess.already_marked ? 'has-active' : ''} fade-in">
+      <div class="course-card-header">
+        <div>
+          <div class="course-code">${c.course_code}</div>
+          <div class="course-name">${c.course_name}</div>
+          <div class="course-lecturer">${c.lecturer_name}</div>
+        </div>
+        ${!sess ? '<span class="badge badge-closed">Closed</span>' : ''}
+      </div>
+      <div class="course-card-body">
+        ${sessionHTML}
+      </div>
+    </div>`;
+}
+
+// ─────────────────────────────────────────────────
+// COUNTDOWN TIMERS
+// ─────────────────────────────────────────────────
+function startCountdown(courseId, secondsRemaining) {
+  let secs = secondsRemaining;
+  const el = () => document.getElementById(`timer-${courseId}`);
+
+  timers[courseId] = setInterval(() => {
+    secs--;
+    const t = el();
+    if (!t) { clearInterval(timers[courseId]); return; }
+    t.textContent = fmtSecs(secs);
+    t.className   = secs <= 60 ? "timer-value urgent" : "timer-value";
+    if (secs <= 0) {
+      clearInterval(timers[courseId]);
+      // Reload to reflect CLOSED state
+      loadCourses();
+    }
+  }, 1000);
+}
+
+function fmtSecs(secs) {
+  if (secs <= 0) return "00:00";
+  const m = Math.floor(secs / 60).toString().padStart(2, "0");
+  const s = (secs % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+// ─────────────────────────────────────────────────
+// GPS
+// ─────────────────────────────────────────────────
+function prefetchGPS() {
+  if (!navigator.geolocation) {
+    setGpsStatusAll("error", "Geolocation is not supported on this browser.");
+    return;
+  }
+
+  if (geolocationNeedsSecureContext()) {
+    setGpsStatusAll("error", "GPS blocked by browser on non-HTTPS connection.");
+    return;
+  }
+
+  // Do not force a GPS prompt on page load; just reflect known permission state.
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: "geolocation" }).then(result => {
+      if (result.state === "granted") {
+        setGpsStatusAll("ready", "GPS ready");
+      } else if (result.state === "denied") {
+        setGpsStatusAll("error", "Location permission denied — enable it for this site");
+      } else {
+        setGpsStatusAll("waiting", "Tap Mark Attendance to allow GPS");
+      }
+    }).catch(() => {
+      setGpsStatusAll("waiting", "Tap Mark Attendance to request GPS");
+    });
+    return;
+  }
+
+  setGpsStatusAll("waiting", "Tap Mark Attendance to request GPS");
+}
+
+function getGPS() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Your browser does not support geolocation."));
+      return;
+    }
+
+    if (geolocationNeedsSecureContext()) {
+      reject(new Error(insecureContextMessage()));
+      return;
+    }
+
+    const requestPosition = () => {
+      // Always request a fresh reading for each attendance attempt.
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy
+          });
+        },
+        err => {
+          const details = err && err.message ? ` (${err.message})` : "";
+          const msgs = {
+            1: "Location access denied. Allow location for this site and turn on OS location services.",
+            2: "Location unavailable. Ensure device location is enabled and try near a window/open area.",
+            3: "Location request timed out. Please try again."
+          };
+          reject(new Error((msgs[err.code] || "GPS error.") + details));
+        },
+        { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }
+      );
+    };
+
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: "geolocation" }).then(result => {
+        if (result.state === "denied") {
+          reject(new Error("Location access denied. Enable permission for this site in browser settings."));
+          return;
+        }
+        requestPosition();
+      }).catch(() => {
+        requestPosition();
+      });
+      return;
+    }
+
+    requestPosition();
+  });
+}
+
+// ─────────────────────────────────────────────────
+// MARK ATTENDANCE
+// ─────────────────────────────────────────────────
+async function markAttendance(courseId, sessionId) {
+  const btn = document.getElementById(`markBtn-${courseId}`);
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner" style="border-top-color:#001a0f;border-color:rgba(0,26,15,0.3)"></span> Getting location…`;
+
+  let gps;
+  try {
+    gps = await getGPS();
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = "📍 Mark Attendance";
+    showToast(e.message, "error");
+    return;
+  }
+
+  btn.innerHTML = `<span class="spinner" style="border-top-color:#001a0f;border-color:rgba(0,26,15,0.3)"></span> Verifying…`;
+
+  try {
+    const res  = await fetch("/api/student/attendance/mark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        lat:        gps.lat,
+        lng:        gps.lng,
+        accuracy:   gps.accuracy
+      })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      btn.disabled = false;
+      btn.innerHTML = "📍 Mark Attendance";
+      let errMsg = data.error || "Attendance failed.";
+      if (data.debug) {
+        const d = data.debug;
+        errMsg += `\nYour GPS: (${d.your_coords.lat}, ${d.your_coords.lng}) — Venue: (${d.venue_coords.lat}, ${d.venue_coords.lng})`;
+        console.warn("Geofence debug:", d);
+      }
+      showToast(errMsg, "error");
+      return;
+    }
+
+    showToast(`✓ Attendance marked — ${data.distance_m}m from classroom`, "success");
+    // Reload cards to show confirmed state
+    setTimeout(loadCourses, 1200);
+
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = "📍 Mark Attendance";
+    showToast("Network error. Please try again.", "error");
+  }
+}
+
+// ─────────────────────────────────────────────────
+// TOAST
+// ─────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, type = "info") {
+  const el = document.getElementById("toast");
+  el.textContent   = msg;
+  el.className     = `toast ${type} show`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 4500);
+}
+
+function closeGpsModal() {
+  document.getElementById("gpsModal").style.display = "none";
+  prefetchGPS();
+}
+
+// ─────────────────────────────────────────────────
+// QR SCANNER (html5-qrcode)
+// ─────────────────────────────────────────────────
+let activeScanner = null;
+
+async function startScanner(courseId, sessionId) {
+  const box = document.getElementById(`scanner-${courseId}`);
+  const btn = document.getElementById(`scanBtn-${courseId}`);
+  if (!box) return;
+
+  // Toggle off if already scanning
+  if (activeScanner) {
+    try { await activeScanner.stop(); } catch(_) {}
+    activeScanner = null;
+    box.style.display = "none";
+    btn.textContent = "Scan QR Code";
+    return;
+  }
+
+  if (typeof Html5Qrcode === "undefined") {
+    showToast("QR scanner library not loaded", "error");
+    return;
+  }
+
+  box.style.display = "block";
+  btn.textContent = "Stop Scanner";
+
+  const scanner = new Html5Qrcode(`scanner-${courseId}`);
+  activeScanner = scanner;
+
+  try {
+    await scanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 220, height: 220 } },
+      (decodedText) => {
+        // QR decoded — extract token from URL
+        scanner.stop().then(() => {
+          activeScanner = null;
+          box.style.display = "none";
+          btn.textContent = "Scan QR Code";
+          handleScannedQr(decodedText, courseId, sessionId);
+        });
+      },
+      () => {} // ignore scan errors
+    );
+  } catch (err) {
+    box.style.display = "none";
+    btn.textContent = "Scan QR Code";
+    activeScanner = null;
+    showToast("Camera access denied or unavailable.", "error");
+  }
+}
+
+async function handleScannedQr(url, courseId, sessionId) {
+  // Extract token from the scanned URL
+  try {
+    const parsed = new URL(url);
+    const token = parsed.searchParams.get("t");
+    const sid = parseInt(parsed.searchParams.get("session"));
+    if (!token || !sid) {
+      showToast("Invalid QR code.", "error");
+      return;
+    }
+
+    showToast("QR scanned! Capturing GPS...", "success");
+
+    // Get GPS then submit via the attend endpoint
+    let gps;
+    try {
+      gps = await getGPS();
+    } catch (e) {
+      showToast(e.message, "error");
+      return;
+    }
+
+    // Submit via the regular attendance endpoint with QR token
+    const res = await fetch("/api/student/attendance/mark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sid,
+        lat: gps.lat,
+        lng: gps.lng,
+        accuracy: gps.accuracy,
+        qr_token: token,
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(`Attendance marked - ${data.distance_m}m from classroom`, "success");
+      setTimeout(loadCourses, 1200);
+    } else {
+      showToast(data.error || "Attendance failed.", "error");
+    }
+  } catch (e) {
+    showToast("Could not process QR code.", "error");
+  }
+}
+</script>
+{% endblock %}
