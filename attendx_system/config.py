@@ -22,6 +22,49 @@ def _on_vercel() -> bool:
     return os.environ.get("VERCEL") == "1"
 
 
+# Hosts that only ever mean "this machine". On Vercel that is the function's
+# own container, which has no database in it.
+_LOCAL_HOSTS = ("@localhost", "@127.0.0.1", "@[::1]", "@0.0.0.0")
+
+
+def _resolve_database_url() -> str:
+    """Return the URL to use, refusing settings that cannot work on Vercel.
+
+    Validation lives here rather than in the class body: a comprehension
+    inside a class body gets its own scope and cannot read class attributes.
+    """
+    url = _database_url()
+    if not _on_vercel():
+        return url
+
+    if url.startswith("sqlite"):
+        raise RuntimeError(
+            "Set DATABASE_URL to hosted Postgres on Vercel. "
+            "SQLite does not persist on the serverless filesystem."
+        )
+
+    if any(host in url for host in _LOCAL_HOSTS):
+        raise RuntimeError(
+            "DATABASE_URL points at localhost, which on Vercel is this "
+            "function's own container - nothing is listening there. "
+            "This is the placeholder from .env.example; replace it with the "
+            "connection string from your hosted Postgres provider "
+            "(Vercel Storage, Neon, Supabase, ...)."
+        )
+
+    if "://username:password@" in url:
+        raise RuntimeError(
+            "DATABASE_URL still has the placeholder credentials "
+            "'username:password' from .env.example. Use the real connection "
+            "string from your hosted Postgres provider."
+        )
+
+    if url.startswith("postgresql") and "sslmode=" not in url:
+        url += ("&" if "?" in url else "?") + "sslmode=require"
+
+    return url
+
+
 class Config:
     # -------------------------------------------------------
     # Core Flask settings
@@ -34,17 +77,8 @@ class Config:
     # MySQL:       mysql+pymysql://user:pass@localhost:3306/attendance_db
     # SQLite:      sqlite:///attendance.db  (development only — not for Vercel)
     # -------------------------------------------------------
-    _db_url = _database_url()
     _vercel = _on_vercel()
-
-    if _vercel and _db_url.startswith("sqlite"):
-        raise RuntimeError(
-            "Set DATABASE_URL to hosted Postgres on Vercel. "
-            "SQLite does not persist on the serverless filesystem."
-        )
-
-    if _vercel and _db_url.startswith("postgresql") and "sslmode=" not in _db_url:
-        _db_url += ("&" if "?" in _db_url else "?") + "sslmode=require"
+    _db_url = _resolve_database_url()
 
     SQLALCHEMY_DATABASE_URI = _db_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
