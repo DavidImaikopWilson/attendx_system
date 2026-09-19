@@ -9,6 +9,8 @@ Provides:
 """
 
 import math
+import os
+import sys
 import json
 import hmac
 import hashlib
@@ -20,13 +22,24 @@ from flask import (Flask, render_template, request, redirect,
                    url_for, session, jsonify, abort)
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
-from config import Config
+
+# Vercel loads this file by path with the project root as the working
+# directory, so this folder is not guaranteed to be on sys.path.
+# Local runs (python app.py, python run_student.py) already have it.
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BASE_DIR not in sys.path:
+    sys.path.insert(0, _BASE_DIR)
+
+from config import Config  # noqa: E402  (needs _BASE_DIR on sys.path first)
 
 # ─────────────────────────────────────────────────────────────
 # App & DB initialisation
 # ─────────────────────────────────────────────────────────────
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=os.path.join(_BASE_DIR, "templates"),
+)
 app.config.from_object(Config)
 db = SQLAlchemy(app)
 
@@ -404,7 +417,7 @@ def ensure_schema_compatibility() -> None:
         if "radius" not in course_columns:
             db.session.execute(text(
                 "ALTER TABLE courses "
-                "ADD COLUMN radius REAL NOT NULL DEFAULT 50.0"
+                "ADD COLUMN radius FLOAT NOT NULL DEFAULT 50.0"
             ))
             db.session.commit()
     except Exception:
@@ -415,7 +428,7 @@ def ensure_schema_compatibility() -> None:
         user_columns = {c["name"] for c in inspector.get_columns("users")}
         if "is_superuser" not in user_columns:
             db.session.execute(text(
-                "ALTER TABLE users ADD COLUMN is_superuser BOOLEAN NOT NULL DEFAULT 0"
+                "ALTER TABLE users ADD COLUMN is_superuser BOOLEAN NOT NULL DEFAULT FALSE"
             ))
             db.session.commit()
     except Exception:
@@ -423,20 +436,7 @@ def ensure_schema_compatibility() -> None:
 
     # ── Create admin_logs table if missing ──
     try:
-        existing_tables = inspect(db.engine).get_table_names()
-        if "admin_logs" not in existing_tables:
-            db.session.execute(text("""
-                CREATE TABLE admin_logs (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    admin_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    action      VARCHAR(60) NOT NULL,
-                    target_type VARCHAR(30),
-                    target_id   INTEGER,
-                    details     TEXT,
-                    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            db.session.commit()
+        AdminLog.__table__.create(bind=db.engine, checkfirst=True)
     except Exception:
         pass
 
@@ -445,7 +445,7 @@ def ensure_schema_compatibility() -> None:
         venue_columns = {c["name"] for c in inspector.get_columns("venues")}
         if "radius" not in venue_columns:
             db.session.execute(text(
-                "ALTER TABLE venues ADD COLUMN radius REAL"
+                "ALTER TABLE venues ADD COLUMN radius FLOAT"
             ))
             db.session.commit()
     except Exception:
@@ -589,6 +589,8 @@ def index():
     user = get_current_user()
     if not user:
         return redirect(url_for("login_page"))
+    if user.role == "admin":
+        return redirect(url_for("admin_dashboard"))
     if user.role == "lecturer":
         return redirect(url_for("lecturer_dashboard"))
     return redirect(url_for("student_dashboard"))
@@ -2014,4 +2016,5 @@ with app.app_context():
 
 
 if __name__ == "__main__":
+    # Local only. Port 5000 is also used by run_student.py — do not run both.
     app.run(debug=True, host="0.0.0.0", port=5000)
