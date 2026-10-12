@@ -22,6 +22,47 @@ def _on_vercel() -> bool:
     return os.environ.get("VERCEL") == "1"
 
 
+# The value shipped in .env.example. Refused in production by _resolve_secret_key.
+_PLACEHOLDER_SECRET_KEY = "change-this-in-production-use-a-long-random-string"
+
+
+def _resolve_secret_key() -> str:
+    """Return the signing key, refusing the shipped placeholder in production.
+
+    Same fail-fast shape as _resolve_database_url, and for a sharper reason
+    than usual. This key signs two separate things:
+
+      * the Flask session cookie, so a known key forges `user_id` -- any
+        lecturer, any admin;
+      * the rotating QR token, HMAC-SHA256(SECRET_KEY, "session_id:window"),
+        so a known key computes a valid token offline for any session without
+        ever being in the room.
+
+    The second one is new. Before Stage 4 the token was optional decoration and
+    a default key cost little; Stage 4 made the token the thing that admits a
+    student at an uncalibrated venue, which is every venue until Stage 5 lands.
+    The placeholder being acceptable before that change and unacceptable after
+    it is exactly the kind of drift this project keeps a log for.
+
+    Local development is left alone -- a default key is the reason `flask run`
+    works out of the box, and nothing on a developer's laptop is at risk.
+    """
+    key = os.environ.get("SECRET_KEY", _PLACEHOLDER_SECRET_KEY)
+    if not _on_vercel():
+        return key
+
+    if key == _PLACEHOLDER_SECRET_KEY or not key.strip():
+        raise RuntimeError(
+            "Set SECRET_KEY in the Vercel project's environment variables. "
+            "It is still the placeholder from .env.example, which is public: "
+            "anyone can forge an admin session cookie and compute valid QR "
+            "attendance tokens offline. Generate one with "
+            "`python -c \"import secrets; print(secrets.token_hex(32))\"`, "
+            "then redeploy - Vercel reads environment variables at build time."
+        )
+    return key
+
+
 # Hosts that only ever mean "this machine". On Vercel that is the function's
 # own container, which has no database in it.
 _LOCAL_HOSTS = ("@localhost", "@127.0.0.1", "@[::1]", "@0.0.0.0")
@@ -69,7 +110,7 @@ class Config:
     # -------------------------------------------------------
     # Core Flask settings
     # -------------------------------------------------------
-    SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-in-production-use-a-long-random-string")
+    SECRET_KEY = _resolve_secret_key()
 
     # -------------------------------------------------------
     # Database — swap to your PostgreSQL or MySQL URL in .env
