@@ -336,48 +336,13 @@
 let courses   = [];
 let timers    = {};   // { courseId: intervalId }
 
-// The GPS readiness indicator is PAGE state, not card state.
-//
-// It used to live only in the DOM: buildCard hardcoded "Acquiring GPS..." with
-// a waiting dot, and prefetchGPS -- the only thing that ever wrote anything
-// else -- ran exactly twice in the page's life (at DOMContentLoaded and from
-// closeGpsModal). The 30s poll rebuilds the whole grid, so every status
-// reverted to "Acquiring GPS..." thirty seconds after it was set and never came
-// back. The costly case is a blocked permission: "Location permission denied --
-// enable it for this site" is the most actionable string on the page, and the
-// student lost it to a message that reads as "the app is just slow", so they
-// waited instead of changing the setting.
-//
-// Holding it here and rendering buildCard FROM it makes the indicator
-// idempotent under any number of re-renders.
-let gpsStatus = { kind: "waiting", text: "Acquiring GPS..." };
-
-// Set while an 8-second capture or a POST is in flight -- see renderCourses.
-let captureInFlight = false;
-let renderDeferred  = false;
-
-// The label markAttendance restores on every failure path.
-const MARK_LABEL = "📍 Mark Attendance";
-
-// Lower the flag and let any poll that was turned away mid-capture through.
-function releaseCapture() {
-  captureInFlight = false;
-  resumeRender();
-}
-
 
 function setGpsStatusAll(kind, text) {
-  gpsStatus = { kind, text };
-  applyGpsStatus();
-}
-
-
-function applyGpsStatus() {
   document.querySelectorAll("[id^='gpsText-']").forEach(el => {
-    el.textContent = gpsStatus.text;
+    el.textContent = text;
   });
   document.querySelectorAll("[id^='gpsDot-']").forEach(el => {
-    el.className = `gps-dot ${gpsStatus.kind}`;
+    el.className = `gps-dot ${kind}`;
   });
 }
 
@@ -432,45 +397,7 @@ function renderStats() {
   document.getElementById("statMarked").textContent  = marked;
 }
 
-// True while the grid must not be rebuilt. `grid.innerHTML = ...` detaches
-// every node in it, and two things hold live references into those nodes:
-// an in-flight capture (markAttendance holds `btn` across an 8s getGPS) and a
-// running camera (html5-qrcode holds the scanner container and its <video>).
-function renderBlocked() {
-  return captureInFlight || activeScanner !== null;
-}
-
-// Re-render if a poll was turned away while work was in flight.
-function resumeRender() {
-  if (renderDeferred && !renderBlocked()) renderCourses();
-}
-
 function renderCourses() {
-  // Stage 1 made the capture an 8-second operation against an unguarded
-  // 30s poll, so roughly a quarter of attempts straddled a rebuild:
-  //
-  //  - Capture path: markAttendance captured `btn` once and wrote progress
-  //    into it across getGPS. After a rebuild that node is detached, so the
-  //    progress text and "Verifying..." went to a node outside the document
-  //    while the VISIBLE replacement button sat enabled reading "Mark
-  //    Attendance". The student tapped it again, and of the two POSTs one
-  //    returned 201 and the other 409 "already submitted" -- so a student
-  //    whose attendance WAS recorded was shown a red failure toast.
-  //  - Scanner path: the rebuild removed the container and the <video>
-  //    inside it while `activeScanner` stayed non-null and the MediaStream
-  //    was never stopped. The camera stayed lit with no preview, and the
-  //    next tap was swallowed by the toggle-off branch stopping a scanner
-  //    whose container no longer existed.
-  //
-  // Deferring costs at most one poll interval of staleness, and `courses` has
-  // already been updated by loadCourses, so the deferred render shows fresh
-  // data rather than a replay of what was skipped.
-  if (renderBlocked()) {
-    renderDeferred = true;
-    return;
-  }
-  renderDeferred = false;
-
   // Clear all running timers
   Object.values(timers).forEach(clearInterval);
   timers = {};
@@ -524,8 +451,8 @@ function buildCard(c) {
             </div>
           </div>
           <div class="gps-status" id="gpsStatus-${c.course_id}">
-            <span class="gps-dot ${gpsStatus.kind}" id="gpsDot-${c.course_id}"></span>
-            <span id="gpsText-${c.course_id}">${gpsStatus.text}</span>
+            <span class="gps-dot waiting" id="gpsDot-${c.course_id}"></span>
+            <span id="gpsText-${c.course_id}">Acquiring GPS...</span>
           </div>
           <button class="btn-scan" id="scanBtn-${c.course_id}" onclick="startScanner(${c.course_id}, ${sess.id})">
             Scan QR Code
@@ -608,20 +535,13 @@ function prefetchGPS() {
   // Do not force a GPS prompt on page load; just reflect known permission state.
   if (navigator.permissions && navigator.permissions.query) {
     navigator.permissions.query({ name: "geolocation" }).then(result => {
-      const reflect = () => {
-        if (result.state === "granted") {
-          setGpsStatusAll("ready", "GPS ready");
-        } else if (result.state === "denied") {
-          setGpsStatusAll("error", "Location permission denied — enable it for this site");
-        } else {
-          setGpsStatusAll("waiting", "Tap Mark Attendance to allow GPS");
-        }
-      };
-      reflect();
-      // A denied student has to leave the page to fix it in browser settings.
-      // Without this the indicator still reads "denied" after they have fixed
-      // it, and nothing re-queries until a reload.
-      try { result.addEventListener("change", reflect); } catch (_) {}
+      if (result.state === "granted") {
+        setGpsStatusAll("ready", "GPS ready");
+      } else if (result.state === "denied") {
+        setGpsStatusAll("error", "Location permission denied — enable it for this site");
+      } else {
+        setGpsStatusAll("waiting", "Tap Mark Attendance to allow GPS");
+      }
     }).catch(() => {
       setGpsStatusAll("waiting", "Tap Mark Attendance to request GPS");
     });
@@ -631,36 +551,7 @@ function prefetchGPS() {
   setGpsStatusAll("waiting", "Tap Mark Attendance to request GPS");
 }
 
-// How long to collect GPS fixes before deciding. getCurrentPosition resolves
-// on the FIRST fix, which on Android is the coarse network estimate the fused
-// provider answers with in a few hundred milliseconds -- the real GNSS fix
-// lands seconds later. Collecting for a window and keeping every fix means the
-// server sees the scatter, which is what makes an honest uncertainty possible.
-const GPS_COLLECT_MS   = 8000;
-const GPS_MAX_SAMPLES  = 20;
-// Stop early once the readings are good and settled -- no point making a
-// student on a strong signal wait the full window.
-const GPS_GOOD_ACC_M   = 20;
-const GPS_EARLY_MIN_N  = 5;
-// Early exit also requires that the fixes agree with each OTHER, and that the
-// provider has had a few seconds to hand over from its network estimate to
-// GNSS. Self-reported accuracy on its own is precisely the quantity robust_fix
-// and geofence_decision both refuse to trust: a stationary phone replaying one
-// WiFi-fingerprint estimate reports a confident 15m while sitting 90m from
-// where it thinks it is. Settling on that number alone produced captures whose
-// samples were identical, so spread came out 0.0 and acc_eff collapsed to the
-// self-report -- at or under GPS_GOOD_ACC_M by construction, and therefore
-// permanently below the server's coarse-fix trigger of 0.5 x radius (25m at a
-// default 50m venue). The reason could not fire. These two bounds are what
-// make an early exit mean "the readings settled" rather than "the first
-// provider was sure of itself".
-const GPS_EARLY_MIN_MS  = 4000;
-const GPS_EARLY_AGREE_M = 25;
-// An unanswered permission dialog produces no callback at all, so nothing below
-// would ever run. This is the only timer that starts before the browser speaks.
-const GPS_PERMISSION_MAX_MS = 45000;
-
-function getGPS(onProgress) {
+function getGPS() {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject(new Error("Your browser does not support geolocation."));
@@ -673,128 +564,25 @@ function getGPS(onProgress) {
     }
 
     const requestPosition = () => {
-      const samples = [];
-      let watchId   = null;
-      let timer     = null;
-      let permTimer = null;
-      let done      = false;
-      let started   = 0;
-      let lastErr   = null;
-
-      const finish = (errMessage) => {
-        if (done) return;
-        done = true;
-        if (timer !== null)     clearTimeout(timer);
-        if (permTimer !== null) clearTimeout(permTimer);
-        if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-
-        if (samples.length === 0) {
-          reject(new Error(errMessage || lastErr ||
-                           "Could not get a GPS reading. Please try again."));
-          return;
-        }
-
-        // Best single fix populates the legacy flat fields; the full array
-        // is what the server actually reasons over.
-        const best = samples.reduce((a, b) => (b.acc < a.acc ? b : a));
-        resolve({
-          lat: best.lat,
-          lng: best.lng,
-          accuracy: best.acc,
-          samples: samples
-        });
-      };
-
-      // The collection window starts on the browser's FIRST callback, not when
-      // the watch is registered.
-      //
-      // watchPosition is what raises the permission dialog, and the 8s window
-      // used to start ticking beside it. A student reading Chrome Android's
-      // three-option prompt -- or iOS Safari's site prompt followed by the OS
-      // Location Services prompt -- routinely takes longer than that, so the
-      // window expired with zero samples, called clearWatch (discarding the
-      // watch, so the grant landing a second later could never deliver a fix)
-      // and rejected with the generic "Could not get a GPS reading". The
-      // student had just granted permission and was told GPS failed; the
-      // retry worked because permission was then cached, so the defect
-      // presented as "it always fails the first time". It also made the 15s
-      // geolocation timeout unreachable -- the 8s timer won by 7 seconds every
-      // time, so err.code 3 could never surface its own message.
-      const beginWindow = () => {
-        if (started) return;
-        started = Date.now();
-        if (permTimer !== null) { clearTimeout(permTimer); permTimer = null; }
-        timer = setTimeout(() => finish(), GPS_COLLECT_MS);
-      };
-
-      const agreeM = (a, b) => {
-        const dLat = (a.lat - b.lat) * 111320;
-        const dLng = (a.lng - b.lng) * 111320 *
-                     Math.cos(a.lat * Math.PI / 180);
-        return Math.sqrt(dLat * dLat + dLng * dLng);
-      };
-
-      const settled = () => {
-        if (samples.length < GPS_EARLY_MIN_N) return false;
-        if (Date.now() - started < GPS_EARLY_MIN_MS) return false;
-        const last = samples.slice(-GPS_EARLY_MIN_N);
-        if (!last.every(s => s.acc <= GPS_GOOD_ACC_M)) return false;
-        const lat = last.map(s => s.lat).sort((x, y) => x - y);
-        const lng = last.map(s => s.lng).sort((x, y) => x - y);
-        const mid = { lat: lat[Math.floor(lat.length / 2)],
-                      lng: lng[Math.floor(lng.length / 2)] };
-        return last.every(s => agreeM(s, mid) <= GPS_EARLY_AGREE_M);
-      };
-
-      watchId = navigator.geolocation.watchPosition(
+      // Always request a fresh reading for each attendance attempt.
+      navigator.geolocation.getCurrentPosition(
         pos => {
-          beginWindow();
-          samples.push({
+          resolve({
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
-            acc: pos.coords.accuracy
+            accuracy: pos.coords.accuracy
           });
-
-          if (typeof onProgress === "function") {
-            onProgress(samples.length, pos.coords.accuracy);
-          }
-
-          if (samples.length >= GPS_MAX_SAMPLES || settled()) finish();
         },
         err => {
-          beginWindow();
           const details = err && err.message ? ` (${err.message})` : "";
           const msgs = {
             1: "Location access denied. Allow location for this site and turn on OS location services.",
             2: "Location unavailable. Ensure device location is enabled and try near a window/open area.",
             3: "Location request timed out. Please try again."
           };
-
-          // Denial is permanent -- nothing later in this window can fix it.
-          if (err && err.code === 1) { finish(msgs[1] + details); return; }
-
-          // Everything else is transient and must NOT end the capture.
-          //
-          // The error callback of a watch can fire repeatedly, and a
-          // POSITION_UNAVAILABLE blip is routine on Android while the GNSS
-          // subsystem is still acquiring and only the fused network estimate
-          // exists. This used to call finish() the moment one arrived if any
-          // sample had been collected, which turned the common sequence
-          // "coarse fix at 0.3s, blip at 1.0s" into a ONE-sample submission --
-          // and one sample is the worst possible input to Stage 1, because
-          // robust_fix only drops the leading coarse fix when it has three or
-          // more (app.py:680) and only measures spread when it has two
-          // (app.py:690), so the single surviving sample IS the fix the whole
-          // design exists to discard, reported with spread 0.0 and the
-          // device's own optimistic accuracy. Keep waiting; the window decides.
-          lastErr = (msgs[err && err.code] || "GPS error.") + details;
+          reject(new Error((msgs[err.code] || "GPS error.") + details));
         },
         { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }
-      );
-
-      permTimer = setTimeout(
-        () => finish("Location permission was not answered. Allow location access for this site and try again."),
-        GPS_PERMISSION_MAX_MS
       );
     };
 
@@ -818,99 +606,24 @@ function getGPS(onProgress) {
 // ─────────────────────────────────────────────────
 // MARK ATTENDANCE
 // ─────────────────────────────────────────────────
-
-// Why the adaptive gate demanded a scan. The server returns these codes rather
-// than a bare boolean precisely so a student is never told only "scan the code"
-// -- someone told that with no reason concludes the app is broken and stops
-// trying. The codes are not equivalent and the wording below preserves the
-// difference that matters to the student: `stacked_venue` is permanent and no
-// amount of walking around will clear it, `coarse_fix` clears by moving towards
-// a window, and `venue_uncalibrated` disappears on its own once the room has
-// been used enough.
-const QR_REASON_TEXT = {
-  venue_uncalibrated:             "this room has not yet been confirmed by enough verified check-ins",
-  stacked_venue:                  "another room sits directly above or below this one, and GPS cannot tell floors apart",
-  concurrent_overlapping_session: "another class is running right now in an overlapping area",
-  contested_by_nearby_venue:      "a nearby room fits your position just as well as this one",
-  ambiguous_fix:                  "your position is near the edge of the attendance area",
-  coarse_fix:                     "your GPS reading is too rough to place you in this room on its own",
-};
-
-// Build the student-facing text for a rejected submission.
-//
-// The server has THREE different `debug` shapes across its three rejection
-// branches and they do not share a common set of keys: the weak-GPS branch has
-// no `your_coords`, the QR-required branch has neither `your_coords` nor
-// `confidence`, and the venue's own centre appears in none of them -- removed
-// deliberately, because echoing it back drives the measured distance to zero
-// from anywhere and makes every distance bound in the server decorative.
-//
-// So nothing here may dereference a debug key without checking for it first.
-// This function previously read `d.your_coords.lat` and `d.venue_coords.lat`
-// unconditionally, which threw a TypeError on all three branches; the throw was
-// caught by the outer handler, which replaced the server's specific, actionable
-// message with "Network error. Please try again." That is the worst available
-// substitution -- it tells the student the app is broken at the exact moment the
-// server has explained what to do -- and it made the reason list above
-// invisible, which is the entire mechanism that stops a student concluding the
-// app is broken. Check before you read.
-function explainRejection(data) {
-  let msg = (data && data.error) || "Attendance failed.";
-
-  const reasons = data && Array.isArray(data.reasons) ? data.reasons : [];
-  if (reasons.length) {
-    msg += "\nWhy: " + reasons.map(r => QR_REASON_TEXT[r] || r).join("; ") + ".";
-  }
-
-  const d = data && data.debug;
-  if (d && d.your_coords && typeof d.your_coords.lat === "number") {
-    msg += `\nYour GPS: (${d.your_coords.lat}, ${d.your_coords.lng})`;
-  }
-  if (d && typeof d.distance_m === "number" && typeof d.radius_m === "number") {
-    msg += `\n${d.distance_m}m from the centre — the area is ${d.radius_m}m`;
-  }
-  if (d && typeof d.samples === "number" && typeof d.spread_m === "number") {
-    msg += `\n${d.samples} fix${d.samples === 1 ? "" : "es"}, spread ±${d.spread_m}m`;
-  }
-  return msg;
-}
-
 async function markAttendance(courseId, sessionId) {
   const btn = document.getElementById(`markBtn-${courseId}`);
   if (!btn) return;
 
-  // Second line of defence against the double-POST: the render guard now keeps
-  // the disabled button on screen, but a tap that slips through must not start
-  // a second capture, because the losing POST returns 409 "already submitted"
-  // and the student is shown a failure for attendance that WAS recorded.
-  if (captureInFlight) return;
-  captureInFlight = true;
-
   btn.disabled = true;
-  const spinner = `<span class="spinner" style="border-top-color:#001a0f;border-color:rgba(0,26,15,0.3)"></span>`;
-  btn.innerHTML = `${spinner} Getting location…`;
+  btn.innerHTML = `<span class="spinner" style="border-top-color:#001a0f;border-color:rgba(0,26,15,0.3)"></span> Getting location…`;
 
   let gps;
   try {
-    // Capture takes a few seconds by design -- tell the student why.
-    gps = await getGPS((n, acc) => {
-      btn.innerHTML = `${spinner} Locating… ${n} fix${n === 1 ? "" : "es"} (±${Math.round(acc)}m)`;
-    });
+    gps = await getGPS();
   } catch (e) {
-    // A denial reached through the button is the same fact prefetchGPS reports,
-    // and it has to stick on the indicator rather than only pass by in a toast.
-    if (/denied/i.test(e.message || "")) {
-      setGpsStatusAll("error", "Location permission denied — enable it for this site");
-    }
-    releaseCapture();
     btn.disabled = false;
-    btn.innerHTML = MARK_LABEL;
+    btn.innerHTML = "📍 Mark Attendance";
     showToast(e.message, "error");
     return;
   }
 
-  setGpsStatusAll("ready", "GPS ready");
-  btn.innerHTML = `${spinner} Verifying…`;
+  btn.innerHTML = `<span class="spinner" style="border-top-color:#001a0f;border-color:rgba(0,26,15,0.3)"></span> Verifying…`;
 
   try {
     const res  = await fetch("/api/student/attendance/mark", {
@@ -920,32 +633,31 @@ async function markAttendance(courseId, sessionId) {
         session_id: sessionId,
         lat:        gps.lat,
         lng:        gps.lng,
-        accuracy:   gps.accuracy,
-        samples:    gps.samples
+        accuracy:   gps.accuracy
       })
     });
     const data = await res.json();
 
     if (!res.ok) {
-      releaseCapture();
       btn.disabled = false;
-      btn.innerHTML = MARK_LABEL;
-      showToast(explainRejection(data), "error");
-      if (data && data.debug) console.warn("Geofence debug:", data.debug);
+      btn.innerHTML = "📍 Mark Attendance";
+      let errMsg = data.error || "Attendance failed.";
+      if (data.debug) {
+        const d = data.debug;
+        errMsg += `\nYour GPS: (${d.your_coords.lat}, ${d.your_coords.lng}) — Venue: (${d.venue_coords.lat}, ${d.venue_coords.lng})`;
+        console.warn("Geofence debug:", d);
+      }
+      showToast(errMsg, "error");
       return;
     }
 
     showToast(`✓ Attendance marked — ${data.distance_m}m from classroom`, "success");
-    // Hold captureInFlight until the reload lands. Releasing it here would let
-    // a deferred poll render against the STALE `courses`, which still carries
-    // already_marked = false -- re-enabling the button for a session this
-    // student has just been recorded for.
-    setTimeout(() => { captureInFlight = false; loadCourses(); }, 1200);
+    // Reload cards to show confirmed state
+    setTimeout(loadCourses, 1200);
 
   } catch (e) {
-    releaseCapture();
     btn.disabled = false;
-    btn.innerHTML = MARK_LABEL;
+    btn.innerHTML = "📍 Mark Attendance";
     showToast("Network error. Please try again.", "error");
   }
 }
@@ -975,7 +687,7 @@ let activeScanner = null;
 async function startScanner(courseId, sessionId) {
   const box = document.getElementById(`scanner-${courseId}`);
   const btn = document.getElementById(`scanBtn-${courseId}`);
-  if (!box || !btn) return;
+  if (!box) return;
 
   // Toggle off if already scanning
   if (activeScanner) {
@@ -983,13 +695,8 @@ async function startScanner(courseId, sessionId) {
     activeScanner = null;
     box.style.display = "none";
     btn.textContent = "Scan QR Code";
-    resumeRender();   // a poll may have been held off while the camera was up
     return;
   }
-
-  // Opening the camera mid-capture would run a second capture and a second
-  // POST; one of the two comes back 409 and the student is told it failed.
-  if (captureInFlight) return;
 
   if (typeof Html5Qrcode === "undefined") {
     showToast("QR scanner library not loaded", "error");
@@ -1007,21 +714,13 @@ async function startScanner(courseId, sessionId) {
       { facingMode: "environment" },
       { fps: 10, qrbox: { width: 220, height: 220 } },
       (decodedText) => {
-        // Raise the capture flag BEFORE clearing activeScanner, so the grid is
-        // never left unguarded: handleScannedQr runs the same 8s capture as the
-        // button path and starts it after the scanner is already gone.
-        captureInFlight = true;
-
-        const finishScan = () => {
+        // QR decoded — extract token from URL
+        scanner.stop().then(() => {
           activeScanner = null;
           box.style.display = "none";
           btn.textContent = "Scan QR Code";
           handleScannedQr(decodedText, courseId, sessionId);
-        };
-        // A stop() that rejects must not strand the token unsubmitted, and must
-        // not leave activeScanner set -- that would block every later render
-        // for the life of the page.
-        scanner.stop().then(finishScan, finishScan);
+        });
       },
       () => {} // ignore scan errors
     );
@@ -1030,19 +729,10 @@ async function startScanner(courseId, sessionId) {
     btn.textContent = "Scan QR Code";
     activeScanner = null;
     showToast("Camera access denied or unavailable.", "error");
-    resumeRender();
   }
 }
 
 async function handleScannedQr(url, courseId, sessionId) {
-  // The QR path runs the same 8-second capture as the button path, and it
-  // starts AFTER the scanner has been torn down -- so activeScanner no longer
-  // guards the grid and captureInFlight has to. startScanner already raised the
-  // flag; setting it again keeps this function correct on its own terms, since
-  // it is the only path that can succeed while every venue is uncalibrated.
-  captureInFlight = true;
-  let holdUntilReload = false;
-
   // Extract token from the scanned URL
   try {
     const parsed = new URL(url);
@@ -1058,18 +748,11 @@ async function handleScannedQr(url, courseId, sessionId) {
     // Get GPS then submit via the attend endpoint
     let gps;
     try {
-      gps = await getGPS((n, acc) => {
-        showToast(`Locating… ${n} fix${n === 1 ? "" : "es"} (±${Math.round(acc)}m)`, "success");
-      });
+      gps = await getGPS();
     } catch (e) {
-      if (/denied/i.test(e.message || "")) {
-        setGpsStatusAll("error", "Location permission denied — enable it for this site");
-      }
       showToast(e.message, "error");
       return;
     }
-
-    setGpsStatusAll("ready", "GPS ready");
 
     // Submit via the regular attendance endpoint with QR token
     const res = await fetch("/api/student/attendance/mark", {
@@ -1080,31 +763,18 @@ async function handleScannedQr(url, courseId, sessionId) {
         lat: gps.lat,
         lng: gps.lng,
         accuracy: gps.accuracy,
-        samples: gps.samples,
         qr_token: token,
       })
     });
     const data = await res.json();
     if (res.ok) {
       showToast(`Attendance marked - ${data.distance_m}m from classroom`, "success");
-      // Same reasoning as the button path: hold the flag until fresh data
-      // arrives, or a deferred render redraws this card as unmarked.
-      holdUntilReload = true;
-      setTimeout(() => { captureInFlight = false; loadCourses(); }, 1200);
+      setTimeout(loadCourses, 1200);
     } else {
-      // Same renderer as the main path. A scan that is refused for a reason the
-      // scan cannot fix -- a stacked venue, a contested venue -- has to say so,
-      // or the student rescans the same code until the session closes.
-      showToast(explainRejection(data), "error");
-      if (data && data.debug) console.warn("Geofence debug (QR path):", data.debug);
+      showToast(data.error || "Attendance failed.", "error");
     }
   } catch (e) {
     showToast("Could not process QR code.", "error");
-  } finally {
-    // Every early return above lands here. Without it a malformed QR, a denied
-    // permission or a rejected submission would leave captureInFlight raised
-    // and block every render for the life of the page.
-    if (!holdUntilReload) releaseCapture();
   }
 }
 </script>

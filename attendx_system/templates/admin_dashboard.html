@@ -702,17 +702,6 @@ async function deleteLocation(id, name) {
 // ── GPS CAPTURE ──
 const _gpsPoints = {};  // venueId -> [{lat, lng}]
 const MAX_ACCURACY_M = 500;
-// Collect fixes for a window rather than taking the first one. This matters
-// more here than anywhere else: getCurrentPosition resolves on the coarse
-// network estimate, and a bad survey poisons the venue's fence for every
-// student, every session, until someone re-walks the room.
-const GPS_POINT_MS = 6000;
-
-function _median(nums) {
-  const s = [...nums].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
 
 function openGpsPanel(venueId) {
   // Close any open panels
@@ -730,65 +719,35 @@ function closeGpsPanel(venueId) {
 
 function captureGpsPoint(venueId) {
   const statusEl = document.getElementById(`gps-status-${venueId}`);
-  const btn = document.querySelector(`#gps-row-${venueId} [onclick*="captureGpsPoint"]`);
-  statusEl.textContent = 'Acquiring GPS - hold still...';
+  statusEl.textContent = 'Acquiring GPS...';
 
   if (!navigator.geolocation) {
     statusEl.textContent = 'Geolocation not supported by this browser.';
     return;
   }
 
-  const fixes = [];
-  let watchId = null, timer = null, done = false;
-  if (btn) btn.disabled = true;
-
-  const finish = (errMsg) => {
-    if (done) return;
-    done = true;
-    if (timer !== null) clearTimeout(timer);
-    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-    if (btn) btn.disabled = false;
-
-    if (!fixes.length) {
-      statusEl.textContent = errMsg || 'No GPS reading. Try near a window.';
-      return;
-    }
-
-    const bestAcc = Math.min(...fixes.map(f => f.acc));
-    if (bestAcc > MAX_ACCURACY_M) {
-      statusEl.textContent = `GPS signal too weak (best accuracy: ${Math.round(bestAcc)}m). Try near a window.`;
-      return;
-    }
-
-    // Component-wise median across the window, not the first fix.
-    const lat = _median(fixes.map(f => f.lat));
-    const lng = _median(fixes.map(f => f.lng));
-
-    if (!_gpsPoints[venueId]) _gpsPoints[venueId] = [];
-    _gpsPoints[venueId].push({ lat, lng });
-    const n = _gpsPoints[venueId].length;
-    statusEl.textContent = `${n} point(s) captured (last: ${lat.toFixed(6)}, ${lng.toFixed(6)}, +/-${Math.round(bestAcc)}m from ${fixes.length} fixes)`;
-    document.getElementById(`gps-save-${venueId}`).disabled = false;
-  };
-
-  watchId = navigator.geolocation.watchPosition(
+  navigator.geolocation.getCurrentPosition(
     pos => {
-      fixes.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy });
-      statusEl.textContent = `Acquiring GPS... ${fixes.length} fix(es), +/-${Math.round(pos.coords.accuracy)}m`;
+      if (pos.coords.accuracy > MAX_ACCURACY_M) {
+        statusEl.textContent = `GPS signal too weak (accuracy: ${Math.round(pos.coords.accuracy)}m). Try near a window.`;
+        return;
+      }
+      if (!_gpsPoints[venueId]) _gpsPoints[venueId] = [];
+      _gpsPoints[venueId].push({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      const n = _gpsPoints[venueId].length;
+      statusEl.textContent = `${n} point(s) captured (last: ${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}, +/-${Math.round(pos.coords.accuracy)}m)`;
+      document.getElementById(`gps-save-${venueId}`).disabled = false;
     },
     err => {
-      if (fixes.length) { finish(); return; }
       const msgs = {
         1: 'Location access denied.',
         2: 'Location unavailable. Turn on device location.',
         3: 'Location timed out.',
       };
-      finish(msgs[err.code] || 'GPS error.');
+      statusEl.textContent = msgs[err.code] || 'GPS error.';
     },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
   );
-
-  timer = setTimeout(() => finish(), GPS_POINT_MS);
 }
 
 async function saveGps(venueId) {
