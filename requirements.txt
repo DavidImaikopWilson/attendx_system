@@ -4,5 +4,39 @@ Flask-Login==0.6.3
 Flask-WTF==1.2.1
 python-dotenv==1.0.1
 bcrypt==4.1.3
-psycopg2-binary==2.9.9; python_version < "3.14"
 PyMySQL==1.1.1
+
+# ── Database driver and ORM: both PINNED, deliberately ──────────────────────
+#
+# SQLAlchemy was never pinned. Flask-SQLAlchemy 3.1.1 asks only for
+# `sqlalchemy>=2.0.16`, so every Vercel build installed whatever was newest,
+# and the builds were never reproducible.
+#
+# That took production down on 2026-10-14. A `postgresql://` URL does not name
+# a driver, so SQLAlchemy picks one: 2.0.x chooses psycopg2, and a later
+# release routes it to psycopg (v3) instead. The 19 Sept build got psycopg2 and
+# worked for three weeks; the October build got the psycopg3 dialect, which
+# imports a package this file has never installed:
+#
+#   File ".../sqlalchemy/dialects/postgresql/psycopg.py", line 497
+#     import psycopg
+#   ModuleNotFoundError: No module named 'psycopg'
+#
+# `db = SQLAlchemy(app)` sits at module scope in app.py, so that import error
+# killed the module before a single route was registered -- every path returned
+# 500, including /login. Reverting the application code did not help, because
+# the application code was never the problem.
+#
+# Pinned here so the resolved dialect cannot change again without someone
+# editing this line. config.py also forces the driver into the URL explicitly
+# (postgresql+psycopg2://), so the two defend independently: a version bump
+# alone cannot reroute the dialect, and a DATABASE_URL written with a different
+# driver suffix cannot either.
+SQLAlchemy==2.0.48
+
+# The `; python_version < "3.14"` marker is gone on purpose. It made the driver
+# vanish silently on any Python bump with no build error -- logged as D7, and
+# the same class of failure as the one above. Without it, a Python version that
+# has no wheel fails the BUILD, loudly and immediately, instead of producing a
+# deployment that 500s every request. 2.9.10 adds the 3.13 wheels 2.9.9 lacked.
+psycopg2-binary==2.9.10

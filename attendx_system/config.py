@@ -12,9 +12,44 @@ load_dotenv()
 
 
 def _database_url() -> str:
+    """Return the database URL, with the driver named explicitly.
+
+    A bare `postgresql://` URL does not say which DBAPI to use, so SQLAlchemy
+    picks one -- and which one it picks is a property of the installed
+    SQLAlchemy version, not of this project. That took production down on
+    2026-10-14: SQLAlchemy is not pinned (Flask-SQLAlchemy 3.1.1 asks only for
+    `sqlalchemy>=2.0.16`), so one build resolved a version routing
+    `postgresql://` to psycopg2, which is installed, and a later build resolved
+    one routing it to psycopg (v3), which is not:
+
+        File ".../sqlalchemy/dialects/postgresql/psycopg.py", line 497
+          import psycopg
+        ModuleNotFoundError: No module named 'psycopg'
+
+    `db = SQLAlchemy(app)` is at module scope in app.py, so that killed the
+    import before any route existed and every path returned 500, including
+    /login. Nothing in the application code was involved -- reverting it did
+    not help, because it was never the cause.
+
+    Naming the driver here removes the choice. `postgresql+psycopg2://` always
+    means psycopg2, which requirements.txt pins. The pin and this suffix defend
+    independently: a version bump alone cannot reroute the dialect, and a
+    DATABASE_URL written with some other driver suffix cannot either -- which
+    matters because the URL comes from the Neon integration, not from this repo.
+    """
     url = os.environ.get("DATABASE_URL", "sqlite:///attendance.db")
+
+    # Heroku-style scheme that SQLAlchemy dropped support for.
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
+
+    # Normalise any Postgres URL -- however it names (or fails to name) its
+    # driver -- onto the one driver this project actually installs.
+    if url.startswith("postgresql"):
+        scheme, sep, rest = url.partition("://")
+        if sep:
+            url = "postgresql+psycopg2" + sep + rest
+
     return url
 
 
