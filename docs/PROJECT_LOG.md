@@ -59,7 +59,8 @@ The only place status is read, so it cannot disagree with itself.
 | Schema upgrade hardening | Local + Production | `SHIPPED` | 26/26 upgrade test. DDL now one-statement-per-transaction with rollback (DR-44), closing a path where one failed `ALTER` on the first cold start after a push would 500 every route including `/login`. D12 count corrected 9→16 | 2026-10-11 |
 | Blind-spot sweep | Local + Production | `SHIPPED` | Seven categories of environment-gap and untested-path defects enumerated and checked against source. Six clean or benign; one real — the check-then-insert race, now 409 instead of 500 (DR-45), proven by a forced-race test with a measured pre-fix contrast. Also names what it cannot cover | 2026-10-12 |
 | Stage 6 — collusion detection | Local + Production | `PLANNED` | | |
-| **Outage 2026-10-14 → boot fix (push 1 of 2)** | Production | `SHIPPED` | Total outage: every route 500, cause `ModuleNotFoundError: No module named 'psycopg'` at `db = SQLAlchemy(app)`. **Not caused by any application change** — the reverted baseline failed identically. Unpinned SQLAlchemy resolved a version routing bare `postgresql://` to psycopg3, which was never installed. Fixed by pinning SQLAlchemy, naming the driver in the URL, and making the import-time bootstrap non-fatal (D6 closed). Stage 1–5 held back for push 2 | 2026-10-15 |
+| **Outage 2026-10-14 → boot fix (push 1 of 2)** | Production | `LIVE` | Total outage: every route 500, cause `ModuleNotFoundError: No module named 'psycopg'` at `db = SQLAlchemy(app)`. **Not caused by any application change** — the reverted baseline failed identically. Unpinned SQLAlchemy resolved a version routing bare `postgresql://` to psycopg3, which was never installed. Fixed by pinning SQLAlchemy, naming the driver in the URL, and making the import-time bootstrap non-fatal (D6 closed). Stage 1–5 held back for push 2 | 2026-10-15 |
+| **Push 2 — Stage 1–5 onto main** | Production | `SHIPPED` | The boot fix cherry-picked onto `stage-1-5-work` (a merge silently deletes the stages — DR-49), plus two holes found in the process: the `SECRET_KEY` guard accepted the key this repo publishes (DR-51), and both client suites could not find their pre-fix contrasts on a CRLF checkout (DR-50). 182/182 across all eight suites. The sixteen-column Neon upgrade (D12) is the one step still unproven until this goes live | 2026-10-21 |
 
 ---
 
@@ -137,6 +138,7 @@ region changes, and anything toggled in Vercel project settings.
 | 2026-10-14 02:45 | **PRODUCTION OUTAGE — every route 500.** `ModuleNotFoundError: No module named 'psycopg'` raised from `db = SQLAlchemy(app)` at app.py module scope, so not one route was ever registered. **No application change caused this** — see below. It surfaced right after a Stage 1–5 push, which made the push look responsible | Production | Vercel runtime log, `dpl_7dCNkhv4…`, then `dpl_GdZ3u5YU…` after the revert |
 | 2026-10-14 03:40 | `main` reverted to `15dc187` on the hypothesis that the new code broke the deploy. **The hypothesis was wrong and the revert did not help** — the baseline failed with the identical traceback. Reversible and the work was preserved, but unnecessary: it cost the project record and every deployed feature for nothing, and it was pushed while being described as the fix. Work kept on `stage-1-5-work`; `deploy-baseline` untouched | Production | `38199b3`; both trees hash to `f6da0b03…` |
 | 2026-10-15 | **Boot fix (push 1 of 2).** Root cause: SQLAlchemy was never pinned, so every build resolved whatever was newest, and a bare `postgresql://` URL names no driver. One build routed it to psycopg2 (installed — worked three weeks); a later build routed it to psycopg3 (never installed). Three independent fixes: `SQLAlchemy==2.0.48` pinned in both requirements files; `config._database_url()` normalises every Postgres URL to `postgresql+psycopg2://`; the import-time bootstrap no longer kills module import and `/healthz` reports why. D7's version marker removed. **D6 closed.** Stage 1–5 held back so the boot path is proven against real Vercel on known-good code first | Production | `/login` renders with a dead database, measured; `/healthz` 503 naming all three failed steps |
+| 2026-10-21 | **Push 2 — Stage 1–5 merged onto the proven boot path.** `main` was already serving (`/healthz` 200 `{"ok":true}`, `/login` 200, `/` 302) from push 1, so the boot fix was already live when the stages joined it. The boot fix was moved across by **cherry-pick, not merge** — `git merge main` into `stage-1-5-work` produces a tree containing the boot fix and *zero* Stage 1–5 code, because `main` carries the revert `38199b3` and git treats that removal as the latest intent. That merge was run, inspected, and aborted before anything was pushed (DR-49). Two further defects surfaced only on this tree: the `SECRET_KEY` guard accepted the key this repository publishes (DR-51), and both client suites silently lost their pre-fix contrasts under `core.autocrlf=true` (DR-50) | Production | `0dd5d46`; 182/182 across all eight suites |
 
 ### Stage blocks
 
@@ -910,6 +912,63 @@ Only `docs/PROJECT_LOG.md` is restored to `main` in this push. The eight
 verification suites stay with the code they exercise — most of them test Stage
 1–5 symbols that do not exist on this branch and would fail here.
 
+#### Push 2 — the stages join the proven boot path
+
+```
+Status   : SHIPPED (awaiting LIVE confirmation)
+Scope    : Production
+Entry    : push 1 LIVE — /healthz 200 {"ok":true}, /login 200, / 302
+Exit      : after the push, /healthz stays 200 with Stage 1–5 present, and the
+           sixteen-column upgrade completes against Neon (D12)
+Evidence : 0dd5d46; 182/182 across all eight suites
+Closed   :
+```
+
+**Why this was a cherry-pick and not a merge.** `main` is a linear history that
+runs *through* `2ef258e` (Stage 1–5), then `38199b3` (revert everything), then
+`38707ca` (boot fix on the reverted tree). Merging `main` into `stage-1-5-work`
+therefore asks git to combine "Stage 1–5 present" with "Stage 1–5 deleted, and
+that deletion is the most recent word on the matter" — and it resolves in
+favour of the deletion. The merge was run, the resulting tree *inspected*, and
+found to contain the boot fix and no Stage 1–5 code at all. It was aborted
+before it could be committed or pushed.
+
+`git cherry-pick 38707ca -n` replays the diff instead of combining histories,
+so it never asks the question that gets answered wrongly. It conflicted only on
+`docs/PROJECT_LOG.md` (add/add, because both sides rewrote it), resolved by
+taking the pushed version, which already contains every stage record.
+
+To return the result to `main`, a merge commit with `-s ours` is used — parent
+1 the Stage 1–5 tree, parent 2 `38707ca`, tree taken wholly from parent 1. The
+boot fix reaches `main` as its own content (cherry-picked) rather than through
+the discarded history, and the revert stays in the record instead of being
+erased by a force-push. `deploy-baseline` still pins `15dc187`.
+
+**Two holes found on this tree, neither present on `main` alone.**
+
+The first is a guard that had never actually fired: `_resolve_secret_key`
+refused `_PLACEHOLDER_SECRET_KEY`, while its own comment described the value as
+"shipped in `.env.example`". `.env.example` ships a *different* string —
+`change-this-to-a-long-random-string`. The guard therefore rejected a value
+nobody would paste and accepted the one everybody would, which is the precise
+inversion of its purpose and the one case where a known key is dangerous (DR-51).
+
+The second is a test harness that lied about itself. Both client suites locate
+the code they test by marker and reverse-apply known fixes to prove the tests
+have teeth. Every marker is written with `"\n"`. On this checkout,
+`core.autocrlf=true` had written the template with CRLF, so the multi-line
+reverse literals matched nothing and the suites reported *"pre-fix reversal
+found nothing to reverse"* — a failure that reads like a missing fix but is a
+line-ending mismatch. Content was verified byte-identical modulo line endings
+before changing anything. Both suites now normalise CRLF → LF on read (DR-50).
+
+**What is still not proven.** The sixteen-column upgrade against Neon (D12) has
+only ever run against a SQLite file built by the real baseline app. It will run
+for the first time on the first cold start after this push. With D6 in place a
+failure there degrades rather than blacks out — `/healthz` names the failed
+step and `/login` still renders — but the dashboards would be broken until it
+is fixed. That is the trade the two-push sequence was chosen to make.
+
 #### Stage 6 — Collusion detection
 
 ```
@@ -953,7 +1012,7 @@ description disagree, or a known defect carried deliberately.
 | D12 | **`ensure_schema_compatibility()` has never been run against Postgres.** Stages 1–5 add **sixteen** columns across two tables by guarded `ALTER TABLE` (DR-4), and every execution to date has been SQLite. *Count corrected 2026-10-11* — this entry previously said "nine columns" for Stages 1–4 and then fifteen overall; the actual figures are ten for Stages 1–4 (eight on `attendance_records`, two on `venues`) plus six for Stage 5, so sixteen. The two dialects differ where it matters: SQLite ignores most `ALTER` constraint semantics, and — the defect this surfaced — SQLite does not abort a transaction on a failed statement while Postgres does | Open, but **materially de-risked** 2026-10-11. The *upgrade* path is now exercised locally end-to-end (`docs/verification/schema_upgrade_test.py`, 26/26): the deploy-baseline clone builds the live schema, the current app upgrades that same file, all 16 columns land, pre-upgrade data survives, and a second boot is a no-op. The transaction-poisoning hole it exposed is fixed (DR-44). What remains un-runnable here is Postgres itself — local Python is 3.14 and `psycopg2-binary` is pinned `< 3.14` (D7), so verification item #7's Postgres half still needs an environment on the pinned 3.12, run twice against Neon |
 | D13 | **The client review's six findings (F1–F6).** Three were introduced by the Stage-1 capture rewrite (F1 window-start, F2 transient-error, F6 early-exit over-trust); two the page always carried (F3 poll-detaches-capture, F4 indicator-reset); one is server-side display (F5 lecturer shown the device self-report, not `acc_eff`) | **Resolved** 2026-10-06 — see the "Client-layer review and remediation" block. Fixes in [student_dashboard.html](../attendx_system/templates/student_dashboard.html) (F1–F4, F6) and `reported_uncertainty` in [app.py](../attendx_system/app.py) (F5); proof in `docs/verification/`. Author-confirmed only — D11 applies |
 | D14 | **A calibrated venue's fence is learned, so it moves off the survey — and can differ from it in both directions.** The centre is the median of verified check-ins and the radius their 90th-percentile reach + 10m. By design this corrects a bad survey (§1.6), but it means a calibrated venue accepts some fixes its survey rejected and rejects some it accepted, and the learned radius is generally *larger* than a tight one. The 150m displacement cap and the 2× radius cap bound how far; the admin `clear` action undoes it entirely | **Accepted** 2026-10-07 — the alternative is a fence that never improves, which is the state this stage exists to end. Bounded, audited, and reversible; the survey delta is surfaced to the admin rather than hidden |
-| D15 | **Five endpoint families have no automated coverage at all.** The seven suites exercise the attendance mark path, the calibration logic, the schema upgrade, the client capture/render layer and the admin location endpoints. Untouched: the lecturer calendar and day view, schedule postpone, enrollment management, user promote/demote, and the audit-log reader. Surfaced by the 2026-10-12 blind-spot sweep, which is also the reason this entry exists — the previous status board reported 170 passing checks without saying what they do *not* reach | Open — the untested families are mostly CRUD over already-validated models, which is why they were deprioritised rather than forgotten. Two carry real risk and should be covered first: schedule postpone (mutates `postpone_count`, the one `NOT NULL DEFAULT` column added by ALTER) and promote/demote (changes `is_superuser`, an authorisation boundary) |
+| D15 | **Five endpoint families have no automated coverage at all.** The eight suites exercise the attendance mark path, the calibration logic, the schema upgrade, the boot/config path, the client capture/render layer and the admin location endpoints. Untouched: the lecturer calendar and day view, schedule postpone, enrollment management, user promote/demote, and the audit-log reader. Surfaced by the 2026-10-12 blind-spot sweep, which is also the reason this entry exists — the previous status board reported 170 passing checks without saying what they do *not* reach. The count is now 182 and the gap is unchanged: an eighth suite that tests the boot path does not test the calendar | Open — the untested families are mostly CRUD over already-validated models, which is why they were deprioritised rather than forgotten. Two carry real risk and should be covered first: schedule postpone (mutates `postpone_count`, the one `NOT NULL DEFAULT` column added by ALTER) and promote/demote (changes `is_superuser`, an authorisation boundary) |
 | D16 | **Dependency resolution was never reproducible, and it caused the only total outage this project has had.** `Flask-SQLAlchemy==3.1.1` requires just `sqlalchemy>=2.0.16`, so each Vercel build installed whatever was newest. A bare `postgresql://` URL names no driver, so the dialect came from the installed version: one build chose psycopg2 (present, worked three weeks), a later one chose psycopg3 (absent) and every route returned 500. The same risk applies to every unpinned transitive dependency here — Werkzeug, Jinja2, itsdangerous and greenlet all arrive unpinned through Flask and SQLAlchemy | **Mitigated** 2026-10-15 for the driver specifically: SQLAlchemy pinned, the driver named in the URL, the version marker dropped. **Open in general** — nothing pins the rest, and no lockfile exists. The durable fix is a hash-pinned lockfile (`pip-compile`/`uv lock`) so a build cannot silently differ from the one that was tested. Until then, any build may resolve differently from the last |
 
 The two `requirements.txt` files (repo root and `attendx_system/`) are currently
@@ -1021,6 +1080,9 @@ Choices a later reader would otherwise mistake for accidents.
 | DR-46 | 2026-10-15 | The database driver is named **explicitly** in the URL (`postgresql+psycopg2://`) **and** SQLAlchemy is pinned — two defences for one failure | Either alone leaves the hole open, and they fail in different directions. The pin stops a version bump rerouting the dialect, but cannot help if the `DATABASE_URL` itself names a different driver — and that URL comes from the Neon integration, not this repo, so its suffix cannot be assumed. The explicit suffix stops the URL deciding, but cannot help if a future SQLAlchemy drops the psycopg2 dialect. Belt and braces is the right call for a line whose failure mode is every route returning 500 before any route exists |
 | DR-47 | 2026-10-15 | The import-time bootstrap is **non-fatal**, and `/healthz` reports what failed | Not an exercise in hiding errors — a database that cannot be reached is a real failure and most pages genuinely cannot work without one. But "most pages" is not "the login page", and `/login` needs no database to render. An operator who can load a page and read `{"ok":false,"problems":[...]}` is in a completely different position from one facing an opaque `FUNCTION_INVOCATION_FAILED` on every URL — which is exactly the position this project was in for a day. The errors are collected as a **list**, because when the database is down all three steps fail and the *first* is the informative one |
 | DR-48 | 2026-10-15 | Read the traceback before forming a hypothesis, and never describe an untested inference as the fix | Written as a decision because the incident produced three wrong guesses in a row — `SECRET_KEY`, then Neon being unreachable, then the new application code — and `main` was reverted and pushed on the third while it was being called the fix. The actual cause was in the Runtime Log the whole time, one click away, and named itself in two lines. The revert was reversible and cost nothing permanent, but it removed the project record and every deployed feature for no benefit. Reproducing a plausible failure locally is not evidence that it is *this* failure |
+| DR-49 | 2026-10-21 | To bring a fix from `main` onto `stage-1-5-work`, **cherry-pick the fix; do not merge the branch** — and never trust a merge's exit code without reading the resulting tree | `main` contains a revert of Stage 1–5, so a merge treats "the stages are gone" as the most recent decision on those files and produces a tree with the boot fix and no Stage 1–5 code at all. Git reported success. Nothing about the command's output or exit status distinguished it from a correct merge; only `git diff` against the branch tip did. The correct mental model is that a merge combines *histories*, and a history that records a deletion carries that intent forward, whereas a cherry-pick replays a *diff* and cannot. This is the same class of error as DR-48 — a plausible action taken without checking what it actually produced |
+| DR-50 | 2026-10-21 | The client test harnesses normalise the template to LF before any marker extraction | `core.autocrlf=true` means a Windows checkout differs from the committed blob in line endings only, and every multi-line marker in these suites is written with `"\n"`. The symptom was not a line-ending error but *"pre-fix reversal found nothing to reverse"* — which reads as "the fix is missing from the source" and invites someone to go looking for a defect that is not there. Content was first verified byte-identical modulo line endings (`md5sum` matched after `tr -d '\r'`), so the change is to the harness, not the application. Normalising on read makes extraction independent of checkout settings; the alternative — writing every marker with `\r?\n` — would have to be remembered on every future edit |
+| DR-51 | 2026-10-21 | `SECRET_KEY` placeholders are refused by an explicit **set** of every public value, and a test reads `.env.example` to keep the set honest | The guard's comment claimed to refuse "the value shipped in `.env.example`" while naming a different string, so the value actually published in this repository passed straight through — into a key that signs both the session cookie and the rotating QR token. A single constant cannot express "all known-public values", and reading `.env.example` at import is not an option because that file is not deployed and a missing-file fallback would empty the guard silently. The explicit set plus `boot_config_test.py` reading what `.env.example` actually ships means the two cannot drift again without a test failing — which is what makes this a fix rather than a second comment that can rot |
 
 ---
 
