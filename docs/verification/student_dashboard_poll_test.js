@@ -34,7 +34,17 @@ const fs = require("fs");
 
 const TPL = process.argv[2];
 if (!TPL) throw new Error("usage: node student_dashboard_poll_test.js <student_dashboard.html>");
-const src = fs.readFileSync(TPL, "utf8");
+
+// Normalise CRLF -> LF before anything else. This repo has core.autocrlf=true,
+// so a Windows checkout writes the template with CRLF while the committed blob
+// keeps LF. Every marker below that spans more than one line is written with
+// "\n", so without this the extraction fails on a perfectly good file -- it
+// threw "pre-fix reversal found nothing to reverse" after a `git checkout`
+// rewrote the working tree, which looks exactly like the fix having vanished.
+// It has not; the file is identical modulo line endings (verified by md5 on the
+// normalised text). The line endings are irrelevant to execution, so
+// normalising here costs nothing and makes the suite independent of checkout.
+const src = fs.readFileSync(TPL, "utf8").replace(/\r\n/g, "\n");
 
 // ── extract the real inline script ───────────────────────────────
 const blk = src.indexOf("{% block scripts %}");

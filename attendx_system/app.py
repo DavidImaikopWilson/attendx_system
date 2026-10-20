@@ -3862,11 +3862,86 @@ def fix_demo_passwords():
     print(f"✓ Updated {n} demo account(s) to password123.")
 
 
+# ─────────────────────────────────────────────────────────────
+# IMPORT-TIME BOOTSTRAP  (see BOOTSTRAP_ERRORS below)
+# ─────────────────────────────────────────────────────────────
+#
 # Create tables + demo users whenever the app is loaded (covers `flask run`).
+#
+# Each step is isolated, and none of them may kill module import. This used to
+# be three bare calls, and on 2026-10-14 that turned a dependency problem into
+# a total blackout: the import raised, so Flask never finished registering a
+# single route and every path returned 500 -- including /login, which needs no
+# database at all to render.
+#
+# The judgement here is about blast radius, not about hiding errors. A database
+# that cannot be reached is a real failure and most pages genuinely cannot work
+# without one. But "most pages" is not "the login page", and an operator who
+# can still load a page and read an error is in a completely different position
+# from one facing an opaque FUNCTION_INVOCATION_FAILED on every URL.
+#
+# So: the failure is recorded, surfaced at /healthz, and logged -- and routes
+# that need the database fail individually, where the error can be seen.
+#
+# A LIST, not a single value: when the database is unreachable all three steps
+# fail, and the first one is the informative one. Keeping only the last reports
+# "seed_demo_if_empty failed" when the actual news is "create_all could not
+# open the database".
+#
+# IMPORTANT LIMIT. This protects against the database being unreachable, the
+# schema upgrade failing, and seeding failing. It does NOT protect against a
+# missing driver: `db = SQLAlchemy(app)` above resolves the dialect and imports
+# the DBAPI module, so a missing psycopg still kills the import before this
+# block is reached -- which is exactly what happened on 2026-10-14. That case
+# is addressed by pinning SQLAlchemy and naming the driver in the URL
+# (config._database_url), not here. Wrapping the SQLAlchemy() call itself is
+# not an option: every `class X(db.Model)` below would then have no base.
+BOOTSTRAP_ERRORS: list[str] = []
+
 with app.app_context():
-    db.create_all()
-    ensure_schema_compatibility()
-    seed_demo_if_empty()
+    for _step, _fn in (
+        ("create_all", db.create_all),
+        ("ensure_schema_compatibility", ensure_schema_compatibility),
+        ("seed_demo_if_empty", seed_demo_if_empty),
+    ):
+        try:
+            _fn()
+        except Exception as _exc:                 # noqa: BLE001 - see above
+            _msg = f"{_step}: {type(_exc).__name__}: {_exc}"
+            BOOTSTRAP_ERRORS.append(_msg)
+            app.logger.error("bootstrap step failed -- %s", _msg)
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            # Keep going. A failed ensure_schema_compatibility() must not stop
+            # seeding, and a failed seed must not stop the app from serving.
+            continue
+
+
+@app.route("/healthz")
+def healthz():
+    """
+    Is this instance actually able to serve?
+
+    Deliberately public and deliberately database-touching: the whole point is
+    to be reachable when the database is not, and to say so plainly instead of
+    leaving an operator to infer it from a 500 on every page.
+
+    Returns 200 when the bootstrap completed and a trivial query succeeds, 503
+    with the reasons otherwise. No schema details and no connection string --
+    just which step failed and the exception type.
+    """
+    problems = list(BOOTSTRAP_ERRORS)
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception as exc:                      # noqa: BLE001
+        db.session.rollback()
+        problems.append(f"query: {type(exc).__name__}: {exc}")
+
+    if problems:
+        return jsonify({"ok": False, "problems": problems}), 503
+    return jsonify({"ok": True}), 200
 
 
 if __name__ == "__main__":

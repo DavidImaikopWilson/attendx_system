@@ -59,6 +59,7 @@ The only place status is read, so it cannot disagree with itself.
 | Schema upgrade hardening | Local + Production | `SHIPPED` | 26/26 upgrade test. DDL now one-statement-per-transaction with rollback (DR-44), closing a path where one failed `ALTER` on the first cold start after a push would 500 every route including `/login`. D12 count corrected 9→16 | 2026-10-11 |
 | Blind-spot sweep | Local + Production | `SHIPPED` | Seven categories of environment-gap and untested-path defects enumerated and checked against source. Six clean or benign; one real — the check-then-insert race, now 409 instead of 500 (DR-45), proven by a forced-race test with a measured pre-fix contrast. Also names what it cannot cover | 2026-10-12 |
 | Stage 6 — collusion detection | Local + Production | `PLANNED` | | |
+| **Outage 2026-10-14 → boot fix (push 1 of 2)** | Production | `SHIPPED` | Total outage: every route 500, cause `ModuleNotFoundError: No module named 'psycopg'` at `db = SQLAlchemy(app)`. **Not caused by any application change** — the reverted baseline failed identically. Unpinned SQLAlchemy resolved a version routing bare `postgresql://` to psycopg3, which was never installed. Fixed by pinning SQLAlchemy, naming the driver in the URL, and making the import-time bootstrap non-fatal (D6 closed). Stage 1–5 held back for push 2 | 2026-10-15 |
 
 ---
 
@@ -133,6 +134,9 @@ region changes, and anything toggled in Vercel project settings.
 | 2026-10-11 | **`deploy-baseline` tag pushed** — annotated tag pinning `15dc187` on GitHub, so the deployment-only state stays downloadable regardless of where `main` moves. `main` not moved; no commits added. A local clone of that state also sits outside the working tree | Production (GitHub) | `git ls-remote origin` shows `refs/tags/deploy-baseline`; clone verified to contain zero Stage 1–5 symbols |
 | 2026-10-11 | Schema upgrade hardening — DDL is now one statement per transaction with a rollback, tables are independent, and `get_open_write_status()`'s probe SELECT rolls back too (DR-44). The upgrade path is exercised locally for the first time: the deploy-baseline clone builds the live schema and the current app upgrades that same file. D12's column count corrected 9→16 | Local + Production | 26/26 schema upgrade; 158/158 across all six suites |
 | 2026-10-12 | Blind-spot sweep — DR-44 was found by accident, so the *class* was enumerated deliberately: seven categories of "differs between test and production, or never exercised". Six came back clean or benign; the seventh was real — the check-then-insert race on both attendance endpoints returned a 500 to a student whose attendance had just been recorded (DR-45). Fixed to the 409 the endpoint already decided on, with a forced-race test. The sweep also records what it cannot cover: Postgres itself, real concurrency, and five endpoint families with no coverage at all | Local + Production | 12/12 race test (teeth: 500 before, 409 after); 170/170 across all seven suites |
+| 2026-10-14 02:45 | **PRODUCTION OUTAGE — every route 500.** `ModuleNotFoundError: No module named 'psycopg'` raised from `db = SQLAlchemy(app)` at app.py module scope, so not one route was ever registered. **No application change caused this** — see below. It surfaced right after a Stage 1–5 push, which made the push look responsible | Production | Vercel runtime log, `dpl_7dCNkhv4…`, then `dpl_GdZ3u5YU…` after the revert |
+| 2026-10-14 03:40 | `main` reverted to `15dc187` on the hypothesis that the new code broke the deploy. **The hypothesis was wrong and the revert did not help** — the baseline failed with the identical traceback. Reversible and the work was preserved, but unnecessary: it cost the project record and every deployed feature for nothing, and it was pushed while being described as the fix. Work kept on `stage-1-5-work`; `deploy-baseline` untouched | Production | `38199b3`; both trees hash to `f6da0b03…` |
+| 2026-10-15 | **Boot fix (push 1 of 2).** Root cause: SQLAlchemy was never pinned, so every build resolved whatever was newest, and a bare `postgresql://` URL names no driver. One build routed it to psycopg2 (installed — worked three weeks); a later build routed it to psycopg3 (never installed). Three independent fixes: `SQLAlchemy==2.0.48` pinned in both requirements files; `config._database_url()` normalises every Postgres URL to `postgresql+psycopg2://`; the import-time bootstrap no longer kills module import and `/healthz` reports why. D7's version marker removed. **D6 closed.** Stage 1–5 held back so the boot path is proven against real Vercel on known-good code first | Production | `/login` renders with a dead database, measured; `/healthz` 503 naming all three failed steps |
 
 ### Stage blocks
 
@@ -800,6 +804,112 @@ byte-identical afterwards.
   audit-log endpoints have no automated coverage at all.
 - **The orphaned `attend.html`** (D5) remains unexamined.
 
+#### Outage 2026-10-14 — and the boot fix (push 1 of 2)
+
+```
+Status   : SHIPPED
+Scope    : Production
+Entry    : none — this was an incident, not a stage
+Exit     : the app boots and /login renders even with no database
+Evidence : measured locally — import survives a dead database, /healthz 503s
+           naming all three failed steps, /login still returns 200
+Closed   : 2026-10-15
+```
+
+**Symptom.** Every route returned `500 FUNCTION_INVOCATION_FAILED`, including
+`/logout` — which is `session.clear()` plus a redirect and cannot fail on its
+own. That alone located the fault at import rather than in any route.
+
+**The traceback, which is the whole story:**
+
+```
+File "/var/task/attendx_system/app.py", line 44, in <module>
+    db = SQLAlchemy(app)
+  ...
+File ".../sqlalchemy/dialects/postgresql/psycopg.py", line 497, in import_dbapi
+    import psycopg
+ModuleNotFoundError: No module named 'psycopg'
+```
+
+Note the dialect file: `postgresql/**psycopg**.py` is the **psycopg3** dialect.
+`requirements.txt` installs **psycopg2**-binary. SQLAlchemy asked for a driver
+this project has never shipped.
+
+**Root cause: an unpinned transitive dependency.** `Flask-SQLAlchemy==3.1.1`
+requires only `sqlalchemy>=2.0.16`, and nothing pinned it further — so every
+Vercel build installed whatever was newest. A bare `postgresql://` URL names no
+driver, so SQLAlchemy picks the default, and *which* default is a property of
+the installed version:
+
+| SQLAlchemy | `postgresql://` resolves to | psycopg2 installed? | outcome |
+|---|---|---|---|
+| the 19 Sept build | `postgresql.psycopg2` | yes | worked for three weeks |
+| the Oct build | `postgresql.psycopg` (v3) | irrelevant — v3 absent | **total outage** |
+
+The builds were never reproducible. Two facts from Era II rule out the
+alternatives: `SECRET_KEY` was set to 64 hex characters, so DR-33's fail-fast
+was not involved; and Python was pinned to 3.12, so `psycopg2-binary`'s
+`python_version < "3.14"` marker did install the driver. psycopg2 was present
+and simply never asked for.
+
+**What this was not.** It was not caused by Stage 1–5, or by the schema
+upgrade, or by anything in the application code. The reverted baseline — code
+that had served for three weeks — failed with a byte-identical traceback. That
+is the single most important fact in this entry, because the revert was
+performed on the opposite assumption.
+
+**A wrong call, recorded.** `main` was reverted to `15dc187` before the
+traceback was read, on the inference that the new code was at fault, and that
+revert was described to the user as the fix. It was not: the baseline failed
+identically. It was reversible and no work was lost, but it removed the project
+record and every deployed feature for no benefit, and it was pushed on a guess.
+Two earlier guesses in the same incident were also wrong — first `SECRET_KEY`,
+then Neon being unreachable. Three inferences, three misses, while the
+traceback sat one click away in Runtime Logs. **Read the traceback first.**
+
+**The fix — three independent legs**, because any one of them alone leaves the
+hole open:
+
+1. **Pin the ORM.** `SQLAlchemy==2.0.48` in *both* requirements files. The
+   resolved dialect can no longer change without someone editing that line.
+2. **Name the driver.** `config._database_url()` now rewrites every Postgres
+   URL — `postgres://`, `postgresql://`, `postgresql+psycopg://` — to
+   `postgresql+psycopg2://`. This matters because the URL comes from the Neon
+   integration, not from this repo, so the suffix cannot be assumed. Verified
+   across all five input forms, with SQLite left untouched.
+3. **Remove the version marker.** `psycopg2-binary==2.9.10`, no
+   `python_version` condition. The marker (D7) made the driver vanish silently
+   on any Python bump; without it, a Python with no wheel fails the **build**,
+   loudly, instead of producing a deployment that 500s every request.
+
+**And D6, finally closed.** The import-time bootstrap was three bare calls, so
+*any* failure in them killed module import and took `/login` with it. It is now
+a loop where each step is isolated, failures are collected into
+`BOOTSTRAP_ERRORS`, logged, and surfaced at a new public `/healthz` (200, or
+503 listing what failed). Measured: with an unreachable database, all three
+steps fail, `/healthz` returns 503 naming each one, and **`/login` still
+returns 200**. Before, that same scenario was `FUNCTION_INVOCATION_FAILED` on
+every URL.
+
+**The limit of D6, stated plainly.** It does **not** cover a missing driver.
+`db = SQLAlchemy(app)` resolves the dialect and imports the DBAPI at line 44,
+*before* the bootstrap block, so this exact outage would still have been a
+blackout with D6 in place. Legs 1–3 are what address that; D6 addresses the
+database being unreachable and the schema upgrade failing. Wrapping the
+`SQLAlchemy()` call is not an option — every `class X(db.Model)` below it would
+lose its base class.
+
+**Why Stage 1–5 is held back (push 2).** The boot path has never succeeded on
+real Vercel, and the one genuinely untested step remains: the sixteen-column
+schema upgrade against Neon (D12). Pushing the fix on known-good baseline code
+first proves the boot path with one variable changed instead of two. With D6 in
+place, if that upgrade then stumbles on push 2, the result is degraded
+dashboards and a readable `/healthz` rather than another blackout.
+
+Only `docs/PROJECT_LOG.md` is restored to `main` in this push. The eight
+verification suites stay with the code they exercise — most of them test Stage
+1–5 symbols that do not exist on this branch and would fail here.
+
 #### Stage 6 — Collusion detection
 
 ```
@@ -833,8 +943,8 @@ description disagree, or a known defect carried deliberately.
 | D3 | Geofence was `base_radius + accuracy`, so the worst accepted reading passed at 550m. The rule asked "is it impossible they are in the room", not "are they in the room" | **Resolved** 2026-09-26 — Stage 2. Note the reject boundary itself is unchanged (`d − a > r` ⟺ `d > r + a`); what closes this is the accuracy cap becoming `min(2 × radius, MAX_GPS_ACCURACY_METRES)`. A 300m fix the old rule accepted at 350m is now refused at 100m |
 | D4 | QR validation was skipped entirely when the field was absent (`if qr_token:`). The anti-relay system was opt-in by the party it constrains, so it protected exactly the students honest enough to use it | **Resolved** 2026-09-26 — Stage 4. Validation still only runs when a token is present ([app.py:2427](../attendx_system/app.py#L2427)), but `qr_required()` at [app.py:1222](../attendx_system/app.py#L1222) now decides whether one was *needed*, enforced at [app.py:2568](../attendx_system/app.py#L2568) after the verdict exists |
 | D5 | `attend.html` is orphaned — it calls a non-existent `/api/attend/info` and carries a `demo_coords` fallback that would return the venue's own coordinates. Dead today; **a backdoor if ever wired up** | Open — out of scope; delete or gate before any real use |
-| D6 | `db.create_all()` + `ensure_schema_compatibility()` + `seed_demo_if_empty()` run at module import ([app.py:3258](../attendx_system/app.py#L3258)), so any database hiccup returns 500 for every route, including `/login`. *Citation corrected 2026-09-30* — this entry previously named a second import-time site; the other call ([app.py:3228](../attendx_system/app.py#L3228)) is inside the `flask init-db` CLI command and does **not** run on import, so the original wording overstated the exposure | Open — out of scope |
-| D7 | `psycopg2-binary` is pinned `; python_version < "3.14"`. If Vercel's Python moves off the pinned 3.12, the driver silently disappears and Postgres stops working with no build error | Open — mitigated by [.python-version](../.python-version); recheck on any runtime change |
+| D6 | `db.create_all()` + `ensure_schema_compatibility()` + `seed_demo_if_empty()` ran at module import, so any database hiccup returned 500 for every route, including `/login`. Carried as "out of scope" since Stage 0 | **Resolved** 2026-10-15 — and it stopped being out of scope the day it caused a total outage. The three calls are now an isolated loop; failures collect into `BOOTSTRAP_ERRORS`, are logged, and surface at a public `/healthz` (200, or 503 listing each failed step). Measured: with an unreachable database all three fail and `/login` still returns 200. **Known limit:** `db = SQLAlchemy(app)` imports the DBAPI before this block, so a *missing driver* still kills the import — that case is covered by the SQLAlchemy pin and the explicit `+psycopg2` suffix, not by this |
+| D7 | `psycopg2-binary` was pinned `; python_version < "3.14"`, so the driver would vanish silently on a Python bump with no build error | **Resolved** 2026-10-15 — marker removed, `psycopg2-binary==2.9.10`. A Python with no wheel now fails the *build* rather than yielding a deployment that 500s every request. The 2026-10-14 outage was the same shape through a different route — the driver was installed and simply never asked for (D16), which is why the marker was not the only leg that needed closing |
 | D8 | Demo credentials — including `admin@university.edu` / `password123` — are seeded into the **production** database on cold start by `seed_demo_if_empty()` | **Accepted**, see DR-5 |
 | D9 | **Calibration bootstrap deadlock.** Found while implementing Stage 2, not before it. `OUTSIDE` always rejects and nothing is stored. So a venue whose WiFi fingerprint is systematically offset — say 120m, exactly the §1.1 case Stage 5 exists to fix — rejects every student, accumulates zero records, and can therefore *never* be calibrated. The stage designed to cure systematic offset is unreachable at precisely the venues that have it | **Resolved** 2026-09-26 — Stage 4, `qr_ground_truth_override()` at [app.py:1290](../attendx_system/app.py#L1290). A valid scan at an **uncalibrated** venue overrules `OUTSIDE` within `QR_GROUND_TRUTH_MAX_M` = 500m, landing on `AMBIGUOUS` rather than `INSIDE`, and never applies once a venue is calibrated. Stage 2 was deliberately shipped unchanged rather than weakened to work around this |
 
@@ -844,6 +954,7 @@ description disagree, or a known defect carried deliberately.
 | D13 | **The client review's six findings (F1–F6).** Three were introduced by the Stage-1 capture rewrite (F1 window-start, F2 transient-error, F6 early-exit over-trust); two the page always carried (F3 poll-detaches-capture, F4 indicator-reset); one is server-side display (F5 lecturer shown the device self-report, not `acc_eff`) | **Resolved** 2026-10-06 — see the "Client-layer review and remediation" block. Fixes in [student_dashboard.html](../attendx_system/templates/student_dashboard.html) (F1–F4, F6) and `reported_uncertainty` in [app.py](../attendx_system/app.py) (F5); proof in `docs/verification/`. Author-confirmed only — D11 applies |
 | D14 | **A calibrated venue's fence is learned, so it moves off the survey — and can differ from it in both directions.** The centre is the median of verified check-ins and the radius their 90th-percentile reach + 10m. By design this corrects a bad survey (§1.6), but it means a calibrated venue accepts some fixes its survey rejected and rejects some it accepted, and the learned radius is generally *larger* than a tight one. The 150m displacement cap and the 2× radius cap bound how far; the admin `clear` action undoes it entirely | **Accepted** 2026-10-07 — the alternative is a fence that never improves, which is the state this stage exists to end. Bounded, audited, and reversible; the survey delta is surfaced to the admin rather than hidden |
 | D15 | **Five endpoint families have no automated coverage at all.** The seven suites exercise the attendance mark path, the calibration logic, the schema upgrade, the client capture/render layer and the admin location endpoints. Untouched: the lecturer calendar and day view, schedule postpone, enrollment management, user promote/demote, and the audit-log reader. Surfaced by the 2026-10-12 blind-spot sweep, which is also the reason this entry exists — the previous status board reported 170 passing checks without saying what they do *not* reach | Open — the untested families are mostly CRUD over already-validated models, which is why they were deprioritised rather than forgotten. Two carry real risk and should be covered first: schedule postpone (mutates `postpone_count`, the one `NOT NULL DEFAULT` column added by ALTER) and promote/demote (changes `is_superuser`, an authorisation boundary) |
+| D16 | **Dependency resolution was never reproducible, and it caused the only total outage this project has had.** `Flask-SQLAlchemy==3.1.1` requires just `sqlalchemy>=2.0.16`, so each Vercel build installed whatever was newest. A bare `postgresql://` URL names no driver, so the dialect came from the installed version: one build chose psycopg2 (present, worked three weeks), a later one chose psycopg3 (absent) and every route returned 500. The same risk applies to every unpinned transitive dependency here — Werkzeug, Jinja2, itsdangerous and greenlet all arrive unpinned through Flask and SQLAlchemy | **Mitigated** 2026-10-15 for the driver specifically: SQLAlchemy pinned, the driver named in the URL, the version marker dropped. **Open in general** — nothing pins the rest, and no lockfile exists. The durable fix is a hash-pinned lockfile (`pip-compile`/`uv lock`) so a build cannot silently differ from the one that was tested. Until then, any build may resolve differently from the last |
 
 The two `requirements.txt` files (repo root and `attendx_system/`) are currently
 identical apart from a trailing newline. They must stay in sync; Stage 6 adds
@@ -907,6 +1018,9 @@ Choices a later reader would otherwise mistake for accidents.
 | DR-43 | 2026-10-07 | A re-survey through `set-gps` **clears** any learned fence and any pending candidate, and says so in the audit entry | The learned geometry is defined relative to the survey — the displacement cap measures against it — so a calibration that outlived its survey would be a fence whose own provenance no longer held, and the next recompute would measure displacement from the wrong baseline. An admin re-walking a perimeter has just asserted the old geometry was wrong; keeping a fence derived from it would silently overrule them. The venue re-earns calibration from check-ins, and `cleared_calibration` in the log stops the loss looking like a venue that mysteriously went back to demanding QR |
 | DR-44 | 2026-10-11 | Schema DDL runs **one statement per transaction with a rollback on failure** (`_apply_ddl`), tables are independent of each other, and the same rollback discipline applies to `get_open_write_status()`'s probe SELECT | Found while answering "would a push be fine on Vercel?", and it is the one defect here whose blast radius was the whole application. Postgres aborts the entire transaction on a failed statement and every later statement raises `InFailedSqlTransaction` until someone rolls back; the old code had **seven** `except Exception: pass` handlers and **zero** rollbacks, plus a completely unguarded first `ALTER`. So one DDL hiccup on the first cold start after a push would poison the session, silently fail the remaining fifteen columns, and then throw inside `seed_demo_if_empty()` — which runs at *import*, so module import fails and **every route 500s, including `/login`**. SQLite never showed any of this, which is exactly why it survived five stages of green tests. The fix is structural rather than a wider `try`: a column that cannot be added now costs exactly that column. The early `return` on an unreadable `course_schedules` is also gone — it meant one bad table silently blocked all sixteen later columns |
 | DR-45 | 2026-10-12 | Both attendance inserts catch `IntegrityError`, roll back, and return the **409 the endpoint already decided on** rather than letting a unique-constraint violation become a 500 | The check-then-insert gap on the student path is an 8-second GPS capture wide, and the file had zero `IntegrityError` handlers — so losing a race meant a 500 served to a student whose attendance the *winning* request had just recorded. Two things kept it hidden: the local dev server is single-request, so the window barely exists off Vercel; and F3's client fix removed the visible cause (a poll handing out an enabled duplicate button) without closing the server-side hole, so the symptom left the UI while the defect stayed. Answering a race with the same 409 the code reaches twelve steps earlier is not a new policy — it is the policy, applied on the one path that skipped it. The rollback matters as much as the status: a poisoned session would break the next request on that worker |
+| DR-46 | 2026-10-15 | The database driver is named **explicitly** in the URL (`postgresql+psycopg2://`) **and** SQLAlchemy is pinned — two defences for one failure | Either alone leaves the hole open, and they fail in different directions. The pin stops a version bump rerouting the dialect, but cannot help if the `DATABASE_URL` itself names a different driver — and that URL comes from the Neon integration, not this repo, so its suffix cannot be assumed. The explicit suffix stops the URL deciding, but cannot help if a future SQLAlchemy drops the psycopg2 dialect. Belt and braces is the right call for a line whose failure mode is every route returning 500 before any route exists |
+| DR-47 | 2026-10-15 | The import-time bootstrap is **non-fatal**, and `/healthz` reports what failed | Not an exercise in hiding errors — a database that cannot be reached is a real failure and most pages genuinely cannot work without one. But "most pages" is not "the login page", and `/login` needs no database to render. An operator who can load a page and read `{"ok":false,"problems":[...]}` is in a completely different position from one facing an opaque `FUNCTION_INVOCATION_FAILED` on every URL — which is exactly the position this project was in for a day. The errors are collected as a **list**, because when the database is down all three steps fail and the *first* is the informative one |
+| DR-48 | 2026-10-15 | Read the traceback before forming a hypothesis, and never describe an untested inference as the fix | Written as a decision because the incident produced three wrong guesses in a row — `SECRET_KEY`, then Neon being unreachable, then the new application code — and `main` was reverted and pushed on the third while it was being called the fix. The actual cause was in the Runtime Log the whole time, one click away, and named itself in two lines. The revert was reversible and cost nothing permanent, but it removed the project record and every deployed feature for no benefit. Reproducing a plausible failure locally is not evidence that it is *this* failure |
 
 ---
 

@@ -13,7 +13,11 @@ const fs = require("fs");
 const path = require("path");
 
 const TPL = process.argv[2];
-const src = fs.readFileSync(TPL, "utf8");
+// CRLF -> LF, for the same reason as the poll suite: core.autocrlf=true means a
+// Windows checkout differs from the committed blob in line endings only, and
+// every marker here is written with "\n". Normalising makes extraction
+// independent of how the file was checked out.
+const src = fs.readFileSync(TPL, "utf8").replace(/\r\n/g, "\n");
 
 function grab(a, b) {
   const i = src.indexOf(a);
