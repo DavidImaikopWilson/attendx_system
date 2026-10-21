@@ -60,7 +60,7 @@ The only place status is read, so it cannot disagree with itself.
 | Blind-spot sweep | Local + Production | `SHIPPED` | Seven categories of environment-gap and untested-path defects enumerated and checked against source. Six clean or benign; one real — the check-then-insert race, now 409 instead of 500 (DR-45), proven by a forced-race test with a measured pre-fix contrast. Also names what it cannot cover | 2026-10-12 |
 | Stage 6 — collusion detection | Local + Production | `PLANNED` | | |
 | **Outage 2026-10-14 → boot fix (push 1 of 2)** | Production | `LIVE` | Total outage: every route 500, cause `ModuleNotFoundError: No module named 'psycopg'` at `db = SQLAlchemy(app)`. **Not caused by any application change** — the reverted baseline failed identically. Unpinned SQLAlchemy resolved a version routing bare `postgresql://` to psycopg3, which was never installed. Fixed by pinning SQLAlchemy, naming the driver in the URL, and making the import-time bootstrap non-fatal (D6 closed). Stage 1–5 held back for push 2 | 2026-10-15 |
-| **Push 2 — Stage 1–5 onto main** | Production | `SHIPPED` | The boot fix cherry-picked onto `stage-1-5-work` (a merge silently deletes the stages — DR-49), plus two holes found in the process: the `SECRET_KEY` guard accepted the key this repo publishes (DR-51), and both client suites could not find their pre-fix contrasts on a CRLF checkout (DR-50). 182/182 across all eight suites. The sixteen-column Neon upgrade (D12) is the one step still unproven until this goes live | 2026-10-21 |
+| **Push 2 — Stage 1–5 onto main** | Production | `LIVE` | The boot fix cherry-picked onto `stage-1-5-work` (a merge silently deletes the stages — DR-49), plus two holes found in the process: the `SECRET_KEY` guard accepted the key this repo publishes (DR-51), and both client suites could not find their pre-fix contrasts on a CRLF checkout (DR-50). 182/182 across all eight suites. **Observed live 2026-10-21**: `/healthz` 200 `{"ok":true}` — the sixteen-column upgrade against Neon (D12) completed — `/login` 200, `/` 302, and `GET /api/admin/locations/1/calibration` 405 where the baseline 404s | 2026-10-21 |
 
 ---
 
@@ -915,14 +915,28 @@ verification suites stay with the code they exercise — most of them test Stage
 #### Push 2 — the stages join the proven boot path
 
 ```
-Status   : SHIPPED (awaiting LIVE confirmation)
+Status   : LIVE
 Scope    : Production
 Entry    : push 1 LIVE — /healthz 200 {"ok":true}, /login 200, / 302
 Exit      : after the push, /healthz stays 200 with Stage 1–5 present, and the
            sixteen-column upgrade completes against Neon (D12)
-Evidence : 0dd5d46; 182/182 across all eight suites
-Closed   :
+Evidence : 0dd5d46 (code), eeb5999 (log), a90505a (merge); 182/182 across all
+           eight suites. Live observations 2026-10-21, see below
+Closed   : 2026-10-21
 ```
+
+**Observed live, 2026-10-21.** Vercel serves the previous deployment until the
+new build is ready, so `/healthz` returning 200 proved nothing on its own — it
+is 200 on both builds. The distinguishing probe is a route that exists only in
+Stage 5: `GET /api/admin/locations/1/calibration` returns **405** (the path
+exists, POST only) where the baseline returns **404**. `POST` to the same path
+returns 302 to the login page, which is the correct unauthenticated answer.
+
+`/healthz` returning `{"ok":true}` is the fact that matters. It performs a live
+`SELECT 1` and reports every recorded `BOOTSTRAP_ERRORS` entry, so a 200 means
+`create_all`, `ensure_schema_compatibility` and `seed_demo_if_empty` all
+completed against Neon. **That is the sixteen-column upgrade running on
+Postgres for the first time — D12's unrun half, now run.**
 
 **Why this was a cherry-pick and not a merge.** `main` is a linear history that
 runs *through* `2ef258e` (Stage 1–5), then `38199b3` (revert everything), then
@@ -962,12 +976,16 @@ found nothing to reverse"* — a failure that reads like a missing fix but is a
 line-ending mismatch. Content was verified byte-identical modulo line endings
 before changing anything. Both suites now normalise CRLF → LF on read (DR-50).
 
-**What is still not proven.** The sixteen-column upgrade against Neon (D12) has
-only ever run against a SQLite file built by the real baseline app. It will run
-for the first time on the first cold start after this push. With D6 in place a
-failure there degrades rather than blacks out — `/healthz` names the failed
-step and `/login` still renders — but the dashboards would be broken until it
-is fixed. That is the trade the two-push sequence was chosen to make.
+**What was still not proven — and now is.** The sixteen-column upgrade against
+Neon (D12) had only ever run against a SQLite file built by the real baseline
+app. It ran for the first time on the first cold start after this push, and
+`/healthz` answered `{"ok":true}`, which is only possible if all three
+bootstrap steps — including the upgrade — completed. The mitigation was in
+place but was not needed: had the upgrade failed, D6 would have degraded the
+dashboards rather than blacked them out, `/healthz` would have named the failed
+step, and `/login` would still have rendered. That is the trade the two-push
+sequence was chosen to make, and it is worth stating that it did not have to be
+taken.
 
 #### Stage 6 — Collusion detection
 
@@ -1009,7 +1027,7 @@ description disagree, or a known defect carried deliberately.
 
 | D10 | **The QR token is not bound to the student who submits it.** It is `HMAC(SECRET_KEY, "session_id:window")` — no student id, no device, no IP, no position, and not single-use. One person in the room can therefore serve the current code to any number of people outside it, and every one of those submissions is indistinguishable from theirs. Stage 4's F8 fix (removing `venue_coords` from the rejection body) raises the cost of *pairing* that token with a passing position from one request to three plus trilateration — it does not remove it | Open — **mitigated, not closed, and not closable in this design.** The durable fix is binding the token to the submitting student, which a single code projected to a whole room cannot express. Any real fix changes the interaction model (per-student codes, or the student displaying and the lecturer scanning) |
 | D11 | **No finding touching Stage 4, the client page, or Stage 5 has been checked by anyone but the code's author.** The original wording ("a six-lens review was attempted 2026-09-30 and never ran — zero completions, no journal") was true of two attempts (`wf_01f9b7ed-bde`, `wf_c027cf96-6ff`) and wrong as a general claim: `wf_422082f3-407` raised 18 server findings and `wf_2de7edaf-ec5` raised the 6 client findings, both with journals on disk. What consistently failed was the **refutation** pass, not the finders — so findings were *raised* across the board and *refuted* nowhere. Stage 5's attempt (`wf_d89a1d51-13d`, 2026-10-07) failed at the *finder* stage instead: 4/4 agents errored (3× HTTP 402, 1× DNS), zero results, and its `{"raised": 0}` is an artefact of total failure. Across four attempts the refuters have never once run | Open — re-run when budget allows. Until then the strongest claim for anything Stage-4-or-later is "every test written for it passes, and the tester wrote the code." Note the author's own review is not worthless: it produced DR-26–DR-34, F1–F6, and DR-42, all real. It simply shares the author's blind spots by construction |
-| D12 | **`ensure_schema_compatibility()` has never been run against Postgres.** Stages 1–5 add **sixteen** columns across two tables by guarded `ALTER TABLE` (DR-4), and every execution to date has been SQLite. *Count corrected 2026-10-11* — this entry previously said "nine columns" for Stages 1–4 and then fifteen overall; the actual figures are ten for Stages 1–4 (eight on `attendance_records`, two on `venues`) plus six for Stage 5, so sixteen. The two dialects differ where it matters: SQLite ignores most `ALTER` constraint semantics, and — the defect this surfaced — SQLite does not abort a transaction on a failed statement while Postgres does | Open, but **materially de-risked** 2026-10-11. The *upgrade* path is now exercised locally end-to-end (`docs/verification/schema_upgrade_test.py`, 26/26): the deploy-baseline clone builds the live schema, the current app upgrades that same file, all 16 columns land, pre-upgrade data survives, and a second boot is a no-op. The transaction-poisoning hole it exposed is fixed (DR-44). What remains un-runnable here is Postgres itself — local Python is 3.14 and `psycopg2-binary` is pinned `< 3.14` (D7), so verification item #7's Postgres half still needs an environment on the pinned 3.12, run twice against Neon |
+| D12 | **`ensure_schema_compatibility()` has never been run against Postgres.** Stages 1–5 add **sixteen** columns across two tables by guarded `ALTER TABLE` (DR-4), and every execution to date has been SQLite. *Count corrected 2026-10-11* — this entry previously said "nine columns" for Stages 1–4 and then fifteen overall; the actual figures are ten for Stages 1–4 (eight on `attendance_records`, two on `venues`) plus six for Stage 5, so sixteen. The two dialects differ where it matters: SQLite ignores most `ALTER` constraint semantics, and — the defect this surfaced — SQLite does not abort a transaction on a failed statement while Postgres does | **Resolved live 2026-10-21.** The upgrade ran against Neon on the first cold start after push 2. `/healthz` answered `200 {"ok":true}`, which is only possible if `ensure_schema_compatibility()` completed — the route reports every recorded `BOOTSTRAP_ERRORS` entry alongside a live `SELECT 1`, so a single failed `ALTER` would have produced a 503 naming it. The local half was already exercised end-to-end (`docs/verification/schema_upgrade_test.py`, 26/26: baseline clone builds the live schema, current app upgrades it, 16/16 columns land, pre-upgrade data survives, second boot is a no-op), and the transaction-poisoning hole it exposed was fixed in advance (DR-44). **What this does not prove:** that the new columns hold the values the stages expect — only that they exist and no `ALTER` failed. Stage-level behaviour on real data is still tested on SQLite only |
 | D13 | **The client review's six findings (F1–F6).** Three were introduced by the Stage-1 capture rewrite (F1 window-start, F2 transient-error, F6 early-exit over-trust); two the page always carried (F3 poll-detaches-capture, F4 indicator-reset); one is server-side display (F5 lecturer shown the device self-report, not `acc_eff`) | **Resolved** 2026-10-06 — see the "Client-layer review and remediation" block. Fixes in [student_dashboard.html](../attendx_system/templates/student_dashboard.html) (F1–F4, F6) and `reported_uncertainty` in [app.py](../attendx_system/app.py) (F5); proof in `docs/verification/`. Author-confirmed only — D11 applies |
 | D14 | **A calibrated venue's fence is learned, so it moves off the survey — and can differ from it in both directions.** The centre is the median of verified check-ins and the radius their 90th-percentile reach + 10m. By design this corrects a bad survey (§1.6), but it means a calibrated venue accepts some fixes its survey rejected and rejects some it accepted, and the learned radius is generally *larger* than a tight one. The 150m displacement cap and the 2× radius cap bound how far; the admin `clear` action undoes it entirely | **Accepted** 2026-10-07 — the alternative is a fence that never improves, which is the state this stage exists to end. Bounded, audited, and reversible; the survey delta is surfaced to the admin rather than hidden |
 | D15 | **Five endpoint families have no automated coverage at all.** The eight suites exercise the attendance mark path, the calibration logic, the schema upgrade, the boot/config path, the client capture/render layer and the admin location endpoints. Untouched: the lecturer calendar and day view, schedule postpone, enrollment management, user promote/demote, and the audit-log reader. Surfaced by the 2026-10-12 blind-spot sweep, which is also the reason this entry exists — the previous status board reported 170 passing checks without saying what they do *not* reach. The count is now 182 and the gap is unchanged: an eighth suite that tests the boot path does not test the calendar | Open — the untested families are mostly CRUD over already-validated models, which is why they were deprioritised rather than forgotten. Two carry real risk and should be covered first: schedule postpone (mutates `postpone_count`, the one `NOT NULL DEFAULT` column added by ALTER) and promote/demote (changes `is_superuser`, an authorisation boundary) |
